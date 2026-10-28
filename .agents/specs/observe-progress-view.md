@@ -1,5 +1,10 @@
-# Spec — Observe AI project production against goals
+<!-- specs:locked:6f9476a 2026-10-28 type=spec -->
 
+## Link contract
+- **upstream** (this doc relies on): none
+- **referrers** (must cite this when they change): .agents/specs/system-design.md, .agents/specs/architecture.md, .agents/specs/design-system.md
+
+# Spec — Observe AI project production against goals
 ## Problem & who breaks
 - **Primary user:** an individual developer directing AI coding work in a Git repository.
 - **Break:** a developer cannot see whether ongoing code changes advance, conflict with, or drift away from the project’s stated goals; source code alone does not expose this relationship.
