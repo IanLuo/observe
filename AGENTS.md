@@ -5,7 +5,7 @@
 - Product goal and acceptance contract: `.agents/specs/observe-progress-view.md` (locked).
 - System boundaries, data, interfaces, failure, and scale: `.agents/specs/system-design.md` (locked).
 - Repository structure and load-bearing rationale: `.agents/specs/architecture.md` (to be locked).
-- Visual tokens and interface states: `.agents/specs/design-system.md` (not yet designed).
+- Visual tokens and interface states: `.agents/specs/design-system.md` (locked).
 
 ## How to run / build / test
 
@@ -52,4 +52,4 @@ web/ (TypeScript + SVG) ── built static assets embedded by internal/serve
 | Product requirements, goals, acceptance and NFRs | `.agents/specs/observe-progress-view.md` |
 | Components, data contract, interfaces, failure policy, scale | `.agents/specs/system-design.md` |
 | Load-bearing decisions, layer ownership, repo tree | `.agents/specs/architecture.md` |
-| UI direction and tokens | `.agents/specs/design-system.md` (not yet authored) |
+| UI direction and tokens | `.agents/specs/design-system.md` (locked at `862d5b7`) |
