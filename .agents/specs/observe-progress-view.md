@@ -1,4 +1,4 @@
-<!-- specs:locked:6f9476a 2026-10-28 type=spec -->
+<!-- specs:locked:4bc2da7 2026-10-31 type=spec -->
 
 ## Link contract
 - **upstream** (this doc relies on): none
@@ -23,7 +23,7 @@
   - Live refresh of affected views after file changes settle.
   - Locked Markdown specs are authoritative goal baselines. Other docs and manually provided task prompts are supporting context only.
   - Manual optional task-prompt input; it does not override or replace a locked spec.
-  - Current-state display plus local snapshots at Git commits and explicit user checkpoints, stored outside the repository.
+  - A replaceable local current-state cache outside the repository. No historical snapshots.
   - Read-only operation.
 - **Out of V1:**
   - Runtime tracing or claims about observed execution.
@@ -54,8 +54,8 @@
 - **AC8 — Conflicting specs:** Given two locked specs with incompatible requirements, when loaded, then the conflict is shown unresolved and neither is silently preferred.
 - **AC9 — Failed refresh:** Given a successful prior analysis followed by a failed refresh, when the view updates, then the last successful view remains marked stale with failure time/reason; affected status is unknown until refreshed; retry is available. With no prior success, show the error and keep source browsing available.
 - **AC10 — Read-only:** Given a complete analysis session, when it ends, then tracked/untracked repository state and source/spec file hashes are unchanged.
-- **AC11 — Local privacy:** Given the default configuration, when a full analysis session runs, then no source, spec, task prompt, or snapshot data leaves the machine.
-- **AC12 — History:** Given a commit or explicit checkpoint, when a snapshot is saved, then it is local and outside the repo, contains status/evidence references and analysis version but no source copies, and can be deleted by the user.
+- **AC11 — Local privacy:** Given the default configuration, when a full analysis session runs, then no source, spec, task prompt, or cache data leaves the machine.
+- **AC12 — Current cache only:** Given analysis completes, when the current result is cached, then it is local and outside the repo, contains only derived status/evidence references and analysis version, includes no source copies, and is replaceable or deletable. No historical snapshots are retained.
 
 ## KPIs & failure signal
 - **Usability KPI:** in five representative tasks on the user’s own repository, the user can find a seeded goal conflict or unmapped change from the overview and open its evidence in under two minutes per task, without agent help.
@@ -63,13 +63,13 @@
 - **Interpretation:** meeting the KPI is necessary evidence of usefulness, not proof of analyzer completeness.
 
 ## Non-functional requirements
-- **Privacy:** source code, specs, task prompt, and snapshots stay local by default. No outbound transmission in default mode.
+- **Privacy:** source code, specs, task prompt, and current cache stay local by default. No outbound transmission in default mode.
 - **Safety:** read-only; never edit source, specs, Git refs, or tests. Never execute repository code, build scripts, or hooks. Parse repository text as data, not instructions.
 - **Secret handling:** redact common secret patterns from logs and telemetry. No source-content telemetry.
 - **Performance:** after 500 ms without file changes, refresh the affected area within 3 seconds at p95 for a repository with up to 100,000 tracked lines. This is a target to validate, not a current capability claim.
 - **Platform:** macOS first. Other platforms are not required for V1.
 - **Reliability:** retain the last successful view on refresh failure, mark it stale with reason/time, mark affected statuses unknown, and allow retry.
-- **Persistence:** snapshots are local-only and stored outside the repository. The user can delete project history.
+- **Persistence:** only a replaceable current-state cache is stored locally outside the repository. It is disposable and may be deleted or rebuilt at any time. No history is retained.
 - **Compliance:** N/A — personal local use only; no regulated-data or team-compliance certification in V1.
 
 ## Assumptions & dependencies
@@ -82,28 +82,28 @@
 - **A7 — No `observe` repository currently exists:** this spec creates the project at `~/Documents/apps/observe`. Implementation and architecture are not selected here.
 
 ## Data requirements
-- **Inputs:** local repository path; Git status/diff; tracked source files; locked Markdown specs; optional supporting docs; optional user-entered task prompt; file-change events; user checkpoint requests.
-- **Outputs:** whole-project map; per-goal implementation relationship/status; verification status/evidence; code/source links; inferred/unknown markers; diff highlighting; unresolved spec/prompt conflicts; stale/error state; local snapshots.
+- **Inputs:** local repository path; Git status/diff; tracked source files; locked Markdown specs; optional supporting docs; optional user-entered task prompt; file-change events.
+- **Outputs:** whole-project map; per-goal implementation relationship/status; verification status/evidence; code/source links; inferred/unknown markers; diff highlighting; unresolved spec/prompt conflicts; stale/error state; replaceable current-state cache.
 - **Status vocabulary:** appears-to-support, conflict, unmapped, unavailable, unknown, stale. Verification is separate: verified only with explicit evidence, otherwise unknown or failed.
-- **Snapshot contents:** project identifier/path, timestamp, baseline/spec references, goal statuses, code/evidence references, analysis version, and selected diff identity. No copied source contents.
+- **Cache contents:** project identifier/path, timestamp, input fingerprint, baseline/spec references, goal statuses, code/evidence references, analysis version, and selected diff identity. No copied source contents. Cache is replaceable, not historical.
 - **Empty/edge input:** no selected diff means show the project baseline/map without diff highlights; no locked spec means alignment unavailable; zero tracked source files is a browsable empty project with no inferred progress; unsupported language relationships remain unknown.
-- **Retention:** current view and user-requested/commit snapshots persist locally outside the repo until user deletion. No automatic source retention.
+- **Retention:** retain only the latest current-state cache outside the repo. On input change, replace it after a successful analysis; keep the prior result in memory as stale only during refresh. No commit/checkpoint history. Cache can be deleted and rebuilt.
 
 ## Rollback & recovery
 - **Analysis failure:** keep the last successful view, mark stale with timestamp/reason, set affected statuses unknown, offer retry.
 - **No previous successful view:** show the error and retain source browsing; do not fabricate a partial successful status.
 - **Watcher failure:** mark the view stale and offer manual refresh/retry; never assert freshness.
-- **Snapshot corruption:** discard only the unreadable snapshot after user confirmation; preserve other snapshots and source repository unchanged.
-- **Rollback meaning:** disable the tool or remove its local data directory; project files, Git state, and specs remain unchanged.
+- **Cache corruption:** discard the unreadable current cache and rebuild from source/specs; preserve the repository unchanged.
+- **Rollback meaning:** disable the tool or remove its local cache; project files, Git state, and specs remain unchanged.
 - **Catastrophic failure:** silent goal/spec drift or false verification is the release-blocking trust failure.
 
 ## Security & compliance
 - **Trust boundary:** repository files, Markdown docs, prompts, and Git metadata are untrusted input. They are evidence only, never instructions to execute.
 - **Execution:** no repository code, hooks, scripts, or build/test commands run in V1.
 - **Network:** no external requests in default mode. Any future provider integration requires explicit opt-in, a named provider, and a preview of exact data categories sent.
-- **Data at rest:** local snapshots contain references/statuses, not source copies. Store outside the repo with user-only filesystem permissions where supported.
+- **Data at rest:** the disposable local cache contains references/statuses, not source copies. Store outside the repo with user-only filesystem permissions where supported.
 - **Secrets:** redact common secret patterns from logs/telemetry; do not transmit source-derived telemetry.
-- **Destructive actions:** deleting local history requires explicit user action; analysis itself is read-only.
+- **Destructive actions:** deleting the disposable local cache requires no confirmation; it can be rebuilt. Analysis itself is read-only.
 - **Compliance:** N/A — no regulated-data or team-compliance obligations are accepted for V1.
 
 ## Verification plan
@@ -111,8 +111,8 @@
 - **AC4 drill-down:** browser/UI test that follows one goal through each level to a source location and checks evidence links remain present.
 - **AC6 performance/live refresh:** instrumented local fixture of 100,000 tracked lines; measure end-to-end refresh after 500 ms debounce; pass only if p95 is at most 3 seconds.
 - **AC10 read-only:** before/after Git status, index/ref checks, and file hashes across a full session; no repository mutation allowed.
-- **AC11 privacy:** outbound connection audit in default mode and inspection of telemetry/logs for source, spec, prompt, and snapshot content.
-- **AC12 history:** persistence tests for commit/checkpoint snapshots, schema/version reference, no source-copy payload, deletion, and repo-external storage.
+- **AC11 privacy:** outbound connection audit in default mode and inspection of telemetry/logs for source, spec, prompt, and cache content.
+- **AC12 current cache only:** persistence tests for one replaceable current cache, schema/version and input fingerprint, no source-copy payload, deletion/rebuild, and repo-external storage; verify no historical snapshots are created.
 - **Usability KPI:** five manually observed tasks with seeded conflicts/unmapped changes; record time to locate and open evidence; each under two minutes without agent help.
 - **Release gate:** any failure of AC2, AC3, or AC5 blocks release; these protect correct diff mapping, verification truthfulness, and spec authority.
 
