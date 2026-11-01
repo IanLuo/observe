@@ -1,13 +1,15 @@
-// Command observe reports what the read-only repository reader and the goal
-// baseline see. It is the thin startup layer from .agents/specs/architecture.md:
-// flags and output only, no domain logic.
+// Command observe reports what the read-only repository reader, the goal
+// baseline, and the analyzer see. It is the thin startup layer from
+// .agents/specs/architecture.md: flags and output only, no domain logic.
 package main
 
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"observe/internal/analyze"
+	"observe/internal/model"
 	"observe/internal/repo"
 )
 
@@ -64,13 +66,74 @@ func run(path string) error {
 	for _, d := range baseline.Diagnostics {
 		fmt.Printf("             ! %s\n", d.Message)
 	}
+	if baseline.State != model.BaselineAvailable {
+		fmt.Print("goals        unavailable: goal alignment needs exactly one locked spec\n")
+		return nil
+	}
+
+	specPath := baseline.SpecPaths[0]
+	var specBody []byte
 	for _, s := range specs {
-		if s.Lock.Family != "specs" || s.Lock.Type != "spec" {
-			continue
+		if s.Path == specPath {
+			specBody = s.Body
 		}
-		fmt.Printf("goals        %d in %s\n", len(analyze.Requirements(s.Path, s.Body)), s.Path)
+	}
+
+	files, err := readSources(r, tracked)
+	if err != nil {
+		return err
+	}
+	declarations, parseDiags := analyze.Declarations(files)
+	fmt.Printf("sources      %d files, %d declarations, %d diagnostics\n", len(files), len(declarations), len(parseDiags))
+	for _, d := range parseDiags {
+		fmt.Printf("             ! %s: %s\n", d.Path, d.Message)
+	}
+
+	goals := analyze.Requirements(specPath, specBody)
+	assessments := analyze.Assess(goals, declarations)
+	fmt.Printf("goals        %d in %s\n", len(assessments), specPath)
+	for _, a := range assessments {
+		fmt.Printf("             %-9s links=%-3d tests=%-3d %s\n",
+			a.Relation, len(a.Evidence), len(a.VerificationEvidence), truncate(a.Locator.Label, 64))
+		if line := describeEvidence(a); line != "" {
+			fmt.Println(line)
+		}
 	}
 	return nil
+}
+
+// readSources reads the tracked files in the V1 language set. A tracked file
+// that cannot be read is an error, never a missing file.
+func readSources(r *repo.Repo, tracked []string) ([]analyze.File, error) {
+	var files []analyze.File
+	for _, p := range tracked {
+		if !analyze.IsSourcePath(p) {
+			continue
+		}
+		body, err := r.ReadFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", p, err)
+		}
+		files = append(files, analyze.File{Path: p, Body: body})
+	}
+	return files, nil
+}
+
+// describeEvidence lists the strongest links for a goal, so an inferred link is
+// visible rather than counted.
+func describeEvidence(a model.GoalAssessment) string {
+	if len(a.Evidence) == 0 {
+		return ""
+	}
+	shown := a.Evidence
+	if len(shown) > 3 {
+		shown = shown[:3]
+	}
+	parts := make([]string, len(shown))
+	for i, e := range shown {
+		parts[i] = fmt.Sprintf("%s:%d %s", e.Path, e.LineStart, e.Symbol)
+	}
+	return "                      inferred: " + strings.Join(parts, ", ") + "\n"
 }
 
 // describeType names a lock's document type, which the design family does not carry.
@@ -93,4 +156,11 @@ func short(hash string) string {
 		return hash[:12]
 	}
 	return hash
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }

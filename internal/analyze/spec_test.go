@@ -62,6 +62,9 @@ func TestRequirementsExtractsTopLevelItemsOnly(t *testing.T) {
 - upstream: ignored
 - referrers: ignored
 
+## Problem & who breaks
+- problem framing is context, not a goal
+
 ## Non-negotiable outcome
 - the product shows goal alignment
 - uncertainty stays explicit
@@ -69,9 +72,14 @@ func TestRequirementsExtractsTopLevelItemsOnly(t *testing.T) {
 ### Detail
 - a nested heading still counts as a requirement
 
+## Unrecognised heading
+- an unknown section is goals, never a silent empty success
+
 ## Scope
   - an indented bullet is detail, not a requirement
 - last one
+- **In V1:**
+- **AC1 — Goal trace:** a labelled requirement keeps only its assertion
 `)
 	goals := Requirements(".agents/specs/spec.md", body)
 
@@ -79,7 +87,9 @@ func TestRequirementsExtractsTopLevelItemsOnly(t *testing.T) {
 		"the product shows goal alignment",
 		"uncertainty stays explicit",
 		"a nested heading still counts as a requirement",
+		"an unknown section is goals, never a silent empty success",
 		"last one",
+		"a labelled requirement keeps only its assertion",
 	}
 	if len(goals) != len(want) {
 		t.Fatalf("got %d requirements, want %d: %+v", len(goals), len(want), goals)
@@ -111,13 +121,23 @@ func TestRequirementsSkipsFencedCode(t *testing.T) {
 // The text hash identifies the goal, so restyling the text must not read as a
 // different requirement (system-design, Goal locator).
 func TestGoalTextHashIgnoresEmphasis(t *testing.T) {
-	plain := Requirements("spec.md", []byte("## G\n- a goal with words\n"))
-	bold := Requirements("spec.md", []byte("## G\n- **a goal with words**\n"))
+	plain := Requirements("spec.md", []byte("## G\n- a goal with vivid words\n"))
+	bold := Requirements("spec.md", []byte("## G\n- a goal with **vivid** words\n"))
 
 	if len(plain) != 1 || len(bold) != 1 {
 		t.Fatalf("plain=%+v bold=%+v", plain, bold)
 	}
 	if plain[0].TextHash != bold[0].TextHash {
 		t.Fatalf("emphasis changed the goal identity: %q vs %q", plain[0].TextHash, bold[0].TextHash)
+	}
+}
+
+// A bullet that is only a bold label introduces the nested bullets below it, so
+// it is not a requirement of its own.
+func TestRequirementsSkipsLabelOnlyBullets(t *testing.T) {
+	body := []byte("## Scope\n- **In V1:**\n  - a nested requirement\n- a real requirement\n")
+	goals := Requirements("spec.md", body)
+	if len(goals) != 1 || goals[0].Label != "a real requirement" {
+		t.Fatalf("goals = %+v", goals)
 	}
 }

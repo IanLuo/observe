@@ -10,8 +10,9 @@
 ## How to run / build / test
 
 - `nix develop --command sh -c 'go build ./... && go vet ./... && go test ./... -count=1 && gofmt -l .'` — build, vet, test, format check.
-- `nix develop --command go run ./cmd/observe <repository>` — print what the reader and goal baseline see for a repository.
-- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline and requirement extraction), `cmd/observe`. The remaining packages in the elevator below are designed, not built.
+- `nix build .` — hermetic build; `./result/bin/observe <repository>`.
+- `nix develop --command go run ./cmd/observe <repository>` — report what the reader, goal baseline, and analyzer see.
+- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links), `cmd/observe`. `internal/store`, `internal/watch`, `internal/serve`, and `web/` are designed, not built.
 
 ## Hot invariants
 
@@ -21,6 +22,8 @@
 - Analyzer evidence must carry provenance. Unknown stays unknown; code presence alone is not verification.
 - Persistent state is only a replaceable current-analysis cache outside the repository. No history snapshots.
 - All application access binds to loopback only; no LAN exposure.
+- The V1 language set is Go and TypeScript. `internal/analyze/source.go` is the single place that decides it; every other language stays `unknown`.
+- `nix build` uses `proxyVendor`, not `go mod vendor`: vendoring drops the tree-sitter C sources and headers that cgo compiles.
 
 ## Architecture elevator
 

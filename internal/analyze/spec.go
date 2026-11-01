@@ -67,11 +67,37 @@ func Baseline(docs []Doc) model.SpecBaseline {
 	}
 }
 
+// contextOnly names the sections whose bullets are context rather than goals:
+// problem framing, measures, assumptions, process, and open questions. The specs
+// skill fixes this document shape, so the names are stable across projects.
+//
+// Every other section contributes goals — including headings this set does not
+// name. Excluding by name rather than including by name means a project whose
+// spec uses different headings still yields requirements, instead of reporting a
+// usable baseline with no goals in it.
+var contextOnly = map[string]bool{
+	"Problem & who breaks":       true,
+	"KPIs & failure signal":      true,
+	"Assumptions & dependencies": true,
+	"Verification plan":          true,
+	"Open questions":             true,
+	"Link contract":              true,
+}
+
+// leadIn matches the bold phrase that opens many bullets, as in
+// "**AC1 — Goal trace:** Given a fixture ...". It is a heading for the sentence
+// that follows, not part of the requirement, so it is dropped: leaving it in
+// makes a goal's display label start with markup, and makes a heading word like
+// "Verification" match a declaration it has nothing to do with.
+var leadIn = regexp.MustCompile(`^\*\*[^*]+\*\*[ \t]*:?[ \t]*`)
+
 // Requirements lists the goal locators in one locked spec.
 //
-// A requirement is a top-level list item under a heading, outside the Link
-// contract section and outside fenced code. Only top-level items count: nested
-// bullets are detail under a requirement, not requirements of their own.
+// A requirement is a top-level list item under a heading outside a context-only
+// section, outside fenced code. Only top-level items count: nested bullets are
+// detail under a requirement, not requirements of their own. A bullet that is
+// nothing but a bold label ("**In V1:**") introduces the nested bullets below it
+// and is not itself a requirement.
 func Requirements(specPath string, body []byte) []model.GoalLocator {
 	var (
 		goals []model.GoalLocator
@@ -101,11 +127,14 @@ func Requirements(specPath string, body []byte) []model.GoalLocator {
 			continue
 		}
 
-		if !isTopLevelItem(line) || inLinkContract(stack) {
+		if !isTopLevelItem(line) || inContextOnly(stack) {
 			continue
 		}
 
-		label := strings.TrimSpace(line[2:])
+		label := normalize(leadIn.ReplaceAllString(strings.TrimSpace(line[2:]), ""))
+		if label == "" {
+			continue
+		}
 		chain := make([]string, len(stack))
 		for i, s := range stack {
 			chain[i] = s.text
@@ -137,11 +166,11 @@ func isTopLevelItem(line string) bool {
 	return line[1] == ' '
 }
 
-// inLinkContract reports whether the heading chain is inside the Link contract
-// section, whose bullets record neighbours rather than goals.
-func inLinkContract(stack []section) bool {
+// inContextOnly reports whether the heading chain sits inside a context-only
+// section.
+func inContextOnly(stack []section) bool {
 	for _, s := range stack {
-		if strings.EqualFold(s.text, "Link contract") {
+		if contextOnly[s.text] {
 			return true
 		}
 	}
