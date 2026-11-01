@@ -12,7 +12,8 @@
 - `nix develop --command sh -c 'go build ./... && go vet ./... && go test ./... -count=1 && gofmt -l .'` — build, vet, test, format check.
 - `nix build .` — hermetic build; `./result/bin/observe <repository>`.
 - `nix develop --command go run ./cmd/observe <repository>` — serve the loopback UI on `127.0.0.1` (prints the URL); `-report` prints the same state as JSON and exits.
-- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links, diff classification, prompt conflicts), `internal/store` (input fingerprint, disposable current-state cache), `internal/serve` (loopback HTTP, `/api/state`, lifecycle, embedded page), `cmd/observe`. `internal/watch` and the `web/` TypeScript UI are designed, not built; the embedded page is a placeholder that follows the locked design tokens.
+- `nix develop --command ./web/build.sh` — type-check and bundle `web/` into `internal/serve/static/app.js`. Run it after any `web/` change: the Go build embeds that file, and a test fails when it has drifted from the sources.
+- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links, diff classification, prompt conflicts), `internal/store` (input fingerprint, disposable current-state cache), `internal/serve` (loopback HTTP, `/api/state`, lifecycle, embedded assets), `web/` (TypeScript goal-to-code map, goal rail, detail panel), `cmd/observe`. `internal/watch` is designed, not built.
 
 ## Hot invariants
 
@@ -24,6 +25,7 @@
 - All application access binds to loopback only; no LAN exposure.
 - The V1 language set is Go and TypeScript. `internal/analyze/source.go` is the single place that decides it; every other language stays `unknown`.
 - `nix build` uses `proxyVendor`, not `go mod vendor`: vendoring drops the tree-sitter C sources and headers that cgo compiles.
+- The UI is `web/` TypeScript with no framework and no remote asset: `web/build.sh` type-checks and bundles it to `internal/serve/static/app.js`, `nix build` rebuilds that bundle in its own derivation, and `assets_test.go` fails on drift. The page assigns no `innerHTML` and reaches no network; both are tested.
 
 ## Architecture elevator
 

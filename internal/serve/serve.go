@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"strings"
@@ -230,15 +231,41 @@ func (s *Server) handleClear(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, true, s.State(), "")
 }
 
-// handlePage serves the embedded page with the token it needs for mutations.
+// handlePage serves the embedded UI. The shell carries the token the mutations
+// need; the stylesheet and the bundle are served from the same embedded directory,
+// so the page needs no network of its own.
 func (s *Server) handlePage(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	if path == "" {
+		path = "index.html"
+	}
+
+	body, err := fs.ReadFile(static, path)
+	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	w.Write([]byte(strings.Replace(page, "{{TOKEN}}", s.token, 1)))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Type", contentType(path))
+	if path == "index.html" {
+		body = []byte(strings.Replace(string(body), "{{TOKEN}}", s.token, 1))
+	}
+	w.Write(body)
+}
+
+// contentType names the three asset types the embedded directory holds.
+func contentType(path string) string {
+	switch {
+	case strings.HasSuffix(path, ".html"):
+		return "text/html; charset=utf-8"
+	case strings.HasSuffix(path, ".css"):
+		return "text/css; charset=utf-8"
+	case strings.HasSuffix(path, ".js"):
+		return "text/javascript; charset=utf-8"
+	default:
+		return "application/octet-stream"
+	}
 }
 
 // guarded checks the token and the origin before a mutation runs. A cross-site

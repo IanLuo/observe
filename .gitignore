@@ -3,3 +3,4 @@
 
 # Transient handoff documents (handoff skill); never committed.
 /.agents/context/
+.playwright-mcp/

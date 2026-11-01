@@ -18,6 +18,7 @@ import (
 // another request.
 type State struct {
 	Repository  string     `json:"repository"`
+	Commit      string     `json:"commit,omitempty"`
 	Generation  string     `json:"generation,omitempty"`
 	Freshness   string     `json:"freshness"` // updating, current, stale, failed
 	UpdatedAt   string     `json:"updated_at,omitempty"`
@@ -120,6 +121,7 @@ const maxDiffLines = 40
 func newState(a Analyzed, freshness string, failure *Failure, cache Cache) State {
 	state := State{
 		Repository:  a.Repository,
+		Commit:      a.Snapshot.Fingerprint.Commit,
 		Generation:  a.Snapshot.Generation,
 		Freshness:   freshness,
 		PromptShown: a.PromptShown,
