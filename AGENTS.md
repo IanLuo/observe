@@ -11,8 +11,8 @@
 
 - `nix develop --command sh -c 'go build ./... && go vet ./... && go test ./... -count=1 && gofmt -l .'` — build, vet, test, format check.
 - `nix build .` — hermetic build; `./result/bin/observe <repository>`.
-- `nix develop --command go run ./cmd/observe <repository>` — report what the reader, goal baseline, and analyzer see.
-- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links, diff classification, prompt conflicts), `internal/store` (input fingerprint, disposable current-state cache), `cmd/observe`. `internal/watch`, `internal/serve`, and `web/` are designed, not built.
+- `nix develop --command go run ./cmd/observe <repository>` — serve the loopback UI on `127.0.0.1` (prints the URL); `-report` prints the same state as JSON and exits.
+- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links, diff classification, prompt conflicts), `internal/store` (input fingerprint, disposable current-state cache), `internal/serve` (loopback HTTP, `/api/state`, lifecycle, embedded page), `cmd/observe`. `internal/watch` and the `web/` TypeScript UI are designed, not built; the embedded page is a placeholder that follows the locked design tokens.
 
 ## Hot invariants
 

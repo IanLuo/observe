@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="observe-token" content="{{TOKEN}}">
+<title>Observe</title>
+<style>
+  /* Tokens from .agents/specs/design-system.md (locked at 862d5b7). */
+  :root {
+    --canvas: #F3F5F8; --panel: #FFFFFF; --border: #D8DEE8;
+    --text: #17212F; --text-2: #526174; --muted: #697789;
+    --accent: #315FC5; --conflict: #B53C36; --unmapped: #986300;
+    --slate: #687587; --stale: #6750A4; --verified: #237A52;
+    --diff: #8A5A00; --diff-bg: #FFF6E5;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --canvas: #12161C; --panel: #1A1F27; --border: #2C3441;
+      --text: #E7ECF3; --text-2: #A9B4C4; --muted: #8D99AA;
+      --diff-bg: #2A2214;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--canvas); color: var(--text); font: 14px/1.45 var(--sans); }
+  header { display: flex; flex-wrap: wrap; gap: 12px; align-items: baseline;
+           padding: 16px 24px; background: var(--panel); border-bottom: 1px solid var(--border); }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; }
+  .meta { color: var(--muted); font: 12px/1.5 var(--mono); }
+  .strip { margin-left: auto; display: flex; gap: 12px; align-items: center; }
+  main { display: grid; grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr); gap: 24px; padding: 24px; }
+  @media (max-width: 1100px) { main { grid-template-columns: minmax(0, 1fr); } }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+  h2 { margin: 0 0 12px; font-size: 16px; font-weight: 600; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  .goal { border-top: 1px solid var(--border); padding: 12px 0; }
+  .goal:first-child { border-top: 0; }
+  .goal-head { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; }
+  .label { font-size: 13px; }
+  .badge { font: 600 12px/1 var(--sans); border: 1px solid; border-radius: 6px; padding: 4px 8px; white-space: nowrap; }
+  .b-support { color: var(--accent); border-color: var(--accent); border-style: solid; }
+  .b-conflict { color: var(--conflict); border-color: var(--conflict); border-style: solid; }
+  .b-unmapped { color: var(--unmapped); border-color: var(--unmapped); border-style: dashed; }
+  .b-unknown, .b-unavailable { color: var(--slate); border-color: var(--slate); border-style: dotted; }
+  .b-stale, .b-updating { color: var(--stale); border-color: var(--stale); border-style: solid; }
+  .b-current { color: var(--text-2); border-color: var(--border); }
+  .b-failed { color: var(--conflict); border-color: var(--conflict); }
+  .b-verified { color: var(--verified); border-color: var(--verified); }
+  .row { color: var(--text-2); font-size: 12px; margin-top: 6px; }
+  .row code, .ev code { font: 12px/1.5 var(--mono); color: var(--text); }
+  .ev { display: block; padding: 4px 0 4px 12px; border-left: 2px solid var(--border); margin-top: 6px; }
+  .diag { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  .diff { border-top: 1px solid var(--border); padding: 12px 0; }
+  .diff:first-child { border-top: 0; }
+  .lines { background: var(--diff-bg); border-radius: 6px; margin-top: 8px; overflow-x: auto; }
+  .lines div { font: 12px/1.5 var(--mono); white-space: pre; padding: 1px 8px; }
+  .add { color: var(--verified); }
+  .del { color: var(--conflict); }
+  .changed { color: var(--diff); font-weight: 600; }
+  button { font: 13px var(--sans); color: var(--text); background: var(--panel);
+           border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; cursor: pointer; min-height: 32px; }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .empty { color: var(--muted); }
+  .warn { color: var(--conflict); }
+  .unavailable { color: var(--slate); }
+  footer { padding: 0 24px 24px; color: var(--muted); font-size: 12px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="repo">Observe</h1>
+  <span class="meta" id="repo-meta"></span>
+  <div class="strip">
+    <span id="freshness" class="badge b-updating">⏱ Updating</span>
+    <button id="refresh" type="button">Refresh</button>
+    <button id="clear" type="button">Clear cache</button>
+  </div>
+</header>
+
+<main>
+  <section aria-labelledby="goals-title">
+    <h2 id="goals-title">Goals</h2>
+    <p id="baseline" class="row"></p>
+    <ul id="goals"></ul>
+  </section>
+
+  <div>
+    <section aria-labelledby="diff-title">
+      <h2 id="diff-title">Selected diff</h2>
+      <div id="diff"></div>
+    </section>
+    <section aria-labelledby="conflict-title" style="margin-top: 24px">
+      <h2 id="conflict-title">Prompt conflicts</h2>
+      <div id="conflicts" class="empty">No task prompt.</div>
+    </section>
+  </div>
+</main>
+
+<footer><span id="cache"></span> <span id="diagnostics"></span></footer>
+
+<script>
+const token = document.querySelector('meta[name=observe-token]').content;
+const icons = { support: "▲", conflict: "⚠", unmapped: "◌", unknown: "?", unavailable: "?", stale: "⏱", updating: "⏱", current: "•", failed: "⚠", verified: "✓" };
+
+// relation → badge class and human label. The label always states the status in
+// words, so the state never rests on colour alone.
+function badge(value) {
+  const map = {
+    "appears-to-support": ["support", "b-support", "Appears to support"],
+    "conflict": ["conflict", "b-conflict", "Conflict"],
+    "unmapped": ["unmapped", "b-unmapped", "Unmapped"],
+    "unknown": ["unknown", "b-unknown", "Unknown"],
+    "unavailable": ["unavailable", "b-unavailable", "Unavailable"],
+    "stale": ["stale", "b-stale", "Stale"],
+  };
+  const [icon, cls, text] = map[value] || ["unknown", "b-unknown", value];
+  const el = document.createElement("span");
+  el.className = "badge " + cls;
+  el.textContent = icons[icon] + " " + text;
+  return el;
+}
+
+function text(tag, cls, content) {
+  const el = document.createElement(tag);
+  if (cls) el.className = cls;
+  el.textContent = content == null ? "" : content;
+  return el;
+}
+
+function verification(goal) {
+  const row = text("div", "row", "");
+  row.append("Verification: ");
+  if (goal.verification === "verified") {
+    const b = document.createElement("span");
+    b.className = "badge b-verified";
+    b.textContent = icons.verified + " Verified";
+    row.append(b);
+  } else {
+    const b = document.createElement("span");
+    b.className = "badge b-unknown";
+    b.textContent = icons.unknown + " " + goal.verification;
+    row.append(b);
+  }
+  if (goal.verification_evidence && goal.verification_evidence.length) {
+    row.append(" — " + goal.verification_evidence.length + " test reference(s)");
+  }
+  return row;
+}
+
+function evidence(ref) {
+  const el = text("span", "ev", "");
+  el.append(text("code", "", ref.path + ":" + ref.line_start + (ref.line_end > ref.line_start ? "-" + ref.line_end : "")));
+  el.append(" ");
+  el.append(text("code", "", ref.symbol || "(no symbol)"));
+  el.append(text("div", "row", ref.kind + " · " + ref.provenance + " · confidence " + ref.confidence.toFixed(1)));
+  return el;
+}
+
+function render(state) {
+  document.getElementById("repo").textContent = state.repository.split("/").pop() || state.repository;
+  document.getElementById("repo-meta").textContent =
+    state.generation ? "generation " + state.generation : "";
+  document.getElementById("repo-meta").title = state.repository;
+
+  const fresh = document.getElementById("freshness");
+  fresh.className = "badge b-" + state.freshness;
+  fresh.textContent = icons[state.freshness] + " " + state.freshness;
+  if (state.updated_at) fresh.title = "last analysis " + state.updated_at;
+  if (state.failure) fresh.title = state.failure.at + ": " + state.failure.reason;
+
+  const baseline = document.getElementById("baseline");
+  if (state.baseline.state === "available") {
+    baseline.className = "row";
+    baseline.textContent = "Baseline: " + state.baseline.specs.join(", ");
+  } else {
+    baseline.className = "row unavailable";
+    baseline.textContent = state.baseline.state === "conflicting"
+      ? "Goal alignment unresolved: " + state.baseline.specs.join(" and ") + " both claim the baseline."
+      : "Goal alignment unavailable: no usable locked spec. Browsing stays available.";
+  }
+
+  const goals = document.getElementById("goals");
+  goals.replaceChildren();
+  if (!state.goals.length) {
+    goals.append(text("li", "empty", "No goals to show."));
+  }
+  for (const goal of state.goals) {
+    const li = text("li", "goal", "");
+    const head = text("div", "goal-head", "");
+    head.append(text("span", "label", goal.label));
+    head.append(badge(goal.relation));
+    li.append(head);
+    li.append(text("div", "row", goal.heading.join(" › ") + (goal.inferred ? " · inferred" : "")));
+    for (const ref of goal.evidence) li.append(evidence(ref));
+    li.append(verification(goal));
+    for (const d of goal.diagnostics) li.append(text("div", "diag", "! " + d));
+    goals.append(li);
+  }
+
+  const diff = document.getElementById("diff");
+  diff.replaceChildren();
+  if (!state.diff.files.length) {
+    diff.append(text("p", "empty", "No selected diff: the working tree is clean."));
+  }
+  for (const file of state.diff.files) {
+    const box = text("div", "diff", "");
+    const head = text("div", "row", "");
+    head.append(text("span", "changed", file.status + " " + file.path));
+    head.append(" · +" + file.added + " −" + file.removed);
+    box.append(head);
+    if (file.lines.length) {
+      const lines = text("div", "lines", "");
+      for (const line of file.lines) {
+        lines.append(text("div", line.kind === "added" ? "add" : "del",
+          (line.kind === "added" ? "+ " : "− ") + line.text));
+      }
+      if (file.truncated) {
+        lines.append(text("div", "empty", "… " + file.truncated + " more changed lines"));
+      }
+      box.append(lines);
+    }
+    diff.append(box);
+  }
+
+  const conflicts = document.getElementById("conflicts");
+  conflicts.replaceChildren();
+  if (!state.prompt_conflicts.length) {
+    conflicts.className = "empty";
+    conflicts.textContent = state.prompt_shown ? "No conflict with a locked goal." : "No task prompt.";
+  } else {
+    conflicts.className = "";
+    for (const c of state.prompt_conflicts) {
+      const box = text("div", "diff", "");
+      box.append(badge("conflict"));
+      box.append(text("div", "row", "Prompt: “" + c.prompt + "”"));
+      box.append(text("div", "diag", c.reason));
+      conflicts.append(box);
+    }
+  }
+
+  document.getElementById("cache").textContent =
+    state.cache.state === "disabled"
+      ? "Cache disabled."
+      : "Cache " + state.cache.state + (state.cache.path ? ": " + state.cache.path : "") + ". ";
+  document.getElementById("diagnostics").textContent = state.diagnostics.join(" · ");
+}
+
+async function load() {
+  const res = await fetch("/api/state");
+  const body = await res.json();
+  render(body.data);
+}
+
+async function post(path) {
+  const res = await fetch(path, { method: "POST", headers: { "X-Observe-Token": token } });
+  const body = await res.json();
+  render(body.data);
+  if (!body.ok) document.getElementById("diagnostics").textContent = body.error;
+}
+
+document.getElementById("refresh").addEventListener("click", () => post("/api/refresh"));
+document.getElementById("clear").addEventListener("click", () => post("/api/cache/clear"));
+load();
+</script>
+</body>
+</html>
