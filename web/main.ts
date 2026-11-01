@@ -3,6 +3,7 @@
 
 import { Envelope, State } from "./types";
 import { dirOf, renderMap } from "./map";
+import { renderModuleDetail, renderProject } from "./project";
 import {
   renderBaseline,
   renderConflicts,
@@ -17,6 +18,8 @@ const token = document.querySelector<HTMLMetaElement>("meta[name=observe-token]"
 
 interface View {
   state: State | null;
+  /** mode decides which map is drawn; the project is the default view. */
+  mode: "project" | "goals";
   selected: string | null;
   expanded: Set<string>;
   showDiff: boolean;
@@ -26,6 +29,7 @@ interface View {
 
 const view: View = {
   state: null,
+  mode: "project",
   selected: null,
   expanded: new Set<string>(),
   showDiff: true,
@@ -62,6 +66,11 @@ const handlers = {
   },
   onRefresh: () => void mutate("/api/refresh"),
   onClearCache: () => void mutate("/api/cache/clear"),
+  onMode: (mode: "project" | "goals") => {
+    view.mode = mode;
+    view.selected = null;
+    render();
+  },
   onToggleDiff: () => {
     view.showDiff = !view.showDiff;
     render();
@@ -87,20 +96,30 @@ function render(): void {
   renderBaseline(nodes.baseline, state);
   renderRail(nodes.rail, state, view.selected, handlers);
   renderDiff(nodes.diff, state, view.showDiff, handlers);
-  renderDetail(nodes.detail, state, view.selected);
+  if (view.selected?.startsWith("m:")) renderModuleDetail(nodes.detail, state, view.selected.slice(2));
+  else renderDetail(nodes.detail, state, view.selected);
   renderConflicts(nodes.conflicts, state);
   renderFooter(nodes.footer, state);
 
   const buttons = nodes.header.querySelectorAll("button");
   if (view.pending) for (const button of buttons) button.disabled = true;
 
-  renderMap(nodes.map, state, {
-    selected: view.selected,
-    expanded: view.expanded,
-    showDiff: view.showDiff,
-    onSelect: handlers.onSelect,
-    onToggle: handlers.onToggle,
-  });
+  if (view.mode === "project") {
+    renderProject(nodes.map, state, {
+      selected: view.selected,
+      onSelect: handlers.onSelect,
+      mode: view.mode,
+      onMode: handlers.onMode,
+    });
+  } else {
+    renderMap(nodes.map, state, {
+      selected: view.selected,
+      expanded: view.expanded,
+      showDiff: view.showDiff,
+      onSelect: handlers.onSelect,
+      onToggle: handlers.onToggle,
+    });
+  }
 }
 
 /**
@@ -111,6 +130,7 @@ function render(): void {
  */
 function selectionExists(state: State, key: string): boolean {
   const value = key.slice(2);
+  if (key.startsWith("m:")) return (state.structure?.modules ?? []).some((module) => module.dir === value);
   if (key.startsWith("f:")) return (state.diff.files ?? []).some((file) => file.path === value);
   if (key.startsWith("a:")) {
     return (state.goals ?? []).some((goal) => (goal.evidence ?? []).some((ref) => dirOf(ref.path) === value));

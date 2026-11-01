@@ -14,13 +14,14 @@
 - `nix develop --command go run ./cmd/observe <repository>` — serve the loopback UI on `127.0.0.1` (prints the URL); `-report` prints the same state as JSON and exits.
 - `observe stop [<path>]` — stop the instance serving that project, from any directory inside it. One instance per project; a second start reports the running one instead of shadowing it. The port is the first free one from 8080 unless `-addr` names an exact address.
 - `nix develop --command ./web/build.sh` — type-check and bundle `web/` into `internal/serve/static/app.js`. Run it after any `web/` change: the Go build embeds that file, and a test fails when it has drifted from the sources.
-- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links, diff classification, prompt conflicts), `internal/store` (input fingerprint, disposable current-state cache), `internal/serve` (loopback HTTP, `/api/state`, lifecycle, embedded assets), `web/` (TypeScript goal-to-code map, goal rail, detail panel), `cmd/observe`. `internal/watch` is designed, not built.
+- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links, diff classification, prompt conflicts, construction model: modules, declarations, import edges), `internal/store` (input fingerprint, disposable current-state cache), `internal/serve` (loopback HTTP, `/api/state`, lifecycle, embedded assets), `web/` (TypeScript project map, goal map, rail, detail panels), `cmd/observe`. `internal/watch` is designed, not built.
 
 ## Hot invariants
 
 - The product spec and system design are the source of truth for requirements and component boundaries.
 - Read-only local operation. Never execute repository code, hooks, or build scripts from an analyzed project.
 - Locked specs are the goal baseline. Task prompts and other docs are context only.
+- The project map is construction, not requirement: modules come from tracked source, and an import becomes an edge only when it names a module or file here. Everything else stays external — a guessed dependency is a lie about the architecture.
 - Analyzer evidence must carry provenance. Unknown stays unknown; code presence alone is not verification.
 - Persistent state is only a replaceable current-analysis cache outside the repository. No history snapshots.
 - All application access binds to loopback only; no LAN exposure.

@@ -182,7 +182,7 @@ export function renderDetail(root: HTMLElement, state: State, selected: string |
 
   if (!selected) {
     root.append(el("h2", { text: "Detail" }));
-    root.append(el("p", { class: "empty", text: "Select a goal, an area, or a changed file." }));
+    root.append(el("p", { class: "empty", text: "Select a module, a goal, an area, or a changed file." }));
     root.append(overview(state));
     return;
   }
@@ -281,7 +281,10 @@ function overview(state: State): HTMLElement {
     links += (goal.evidence ?? []).length;
   }
   const changed = (state.diff.files ?? []).length;
+  const modules = (state.structure?.modules ?? []).length;
+  const edges = (state.structure?.edges ?? []).length;
   return el("ul", { class: "facts" }, [
+    el("li", { text: `${modules} module${modules === 1 ? "" : "s"}, ${edges} internal import${edges === 1 ? "" : "s"}` }),
     el("li", { text: `${goals.length} goal${goals.length === 1 ? "" : "s"}` }),
     el("li", { text: `${areas.size} area${areas.size === 1 ? "" : "s"}` }),
     el("li", { text: `${links} evidence link${links === 1 ? "" : "s"}` }),

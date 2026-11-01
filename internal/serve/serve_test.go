@@ -469,8 +469,11 @@ func TestStateCarriesTheProjectStructure(t *testing.T) {
 	if got := modules["cmd/tool"].DependsOn; len(got) != 1 || got[0] != "internal/repo" {
 		t.Errorf("cmd/tool depends on %v, want [internal/repo]", got)
 	}
-	if got := modules["internal/repo"].Decls; got != 1 {
-		t.Errorf("internal/repo decls = %d, want 1", got)
+	if got := modules["internal/repo"].Symbols; len(got) != 1 || got[0].Name != "Open" || got[0].Line != 5 {
+		t.Errorf("internal/repo symbols = %+v, want Open at line 5", got)
+	}
+	if got := modules["internal/repo"].Files; len(got) != 1 || got[0] != "internal/repo/repo.go" {
+		t.Errorf("internal/repo files = %v, want its one file", got)
 	}
 
 	want := Edge{From: "cmd/tool", To: "internal/repo", Import: "observe/internal/repo"}

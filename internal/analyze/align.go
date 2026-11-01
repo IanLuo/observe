@@ -114,7 +114,13 @@ func Align(assessments []model.GoalAssessment, decls []Declaration, changes []Ch
 				continue
 			}
 			found, parseDiags := Declarations([]File{{Path: c.Path, Body: side.body}})
-			diags = append(diags, parseDiags...)
+			// Both sides of one change parse the same path, so the same report would
+			// otherwise appear twice and read as two separate problems.
+			for _, d := range parseDiags {
+				if !containsDiagnostic(diags, d) {
+					diags = append(diags, d)
+				}
+			}
 			*side.into = append(*side.into, found...)
 		}
 	}
@@ -278,4 +284,14 @@ func describeRefs(refs []model.EvidenceRef) string {
 	}
 	sort.Slice(parts, func(i, j int) bool { return parts[i] < parts[j] })
 	return strings.Join(parts, ", ")
+}
+
+// containsDiagnostic reports whether the same report is already collected.
+func containsDiagnostic(diags []model.Diagnostic, d model.Diagnostic) bool {
+	for _, existing := range diags {
+		if existing.Path == d.Path && existing.Op == d.Op && existing.Message == d.Message {
+			return true
+		}
+	}
+	return false
 }

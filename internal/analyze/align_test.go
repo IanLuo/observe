@@ -278,3 +278,22 @@ func TestPromptAgreementIsNotAConflict(t *testing.T) {
 		t.Fatalf("conflicts = %+v, want none", got)
 	}
 }
+
+// A changed file outside the language set is reported once, not once per side of
+// the change, so the diagnostics list stays readable.
+func TestAlignReportsANonSourceChangeOnce(t *testing.T) {
+	change := Change{
+		Path:   "internal/serve/static/app.css",
+		Status: " M",
+		Diff:   "@@ -1,1 +1,2 @@\n .map {}\n+.map-wrap {}\n",
+		Old:    []byte(".map {}\n"),
+		New:    []byte(".map {}\n.map-wrap {}\n"),
+	}
+	_, diags := Align(nil, nil, []Change{change})
+	if len(diags) != 1 {
+		t.Fatalf("diagnostics = %+v, want exactly one", diags)
+	}
+	if got := diags[0].Message; got != "changed file is outside the V1 language set; its declarations stay unknown" {
+		t.Errorf("message = %q", got)
+	}
+}

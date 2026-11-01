@@ -1,6 +1,8 @@
 package analyze
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -70,11 +72,19 @@ func TestStructureOfMapsModulesAndTheirDependencies(t *testing.T) {
 	if len(a.DependsOn) != 1 || a.DependsOn[0] != "internal/b" {
 		t.Errorf("internal/a depends on %v, want [internal/b]", a.DependsOn)
 	}
-	if a.Files != 2 || a.TestFiles != 1 {
-		t.Errorf("internal/a files = %d/%d test, want 2/1", a.Files, a.TestFiles)
+	if want := []string{"internal/a/a.go", "internal/a/a_test.go"}; !equal(a.Files, want) {
+		t.Errorf("internal/a files = %v, want %v", a.Files, want)
 	}
-	if a.Decls != 1 || a.TestDecls != 1 {
-		t.Errorf("internal/a decls = %d/%d test, want 1/1", a.Decls, a.TestDecls)
+	// Every declaration in the module is carried with its line, test or not, because
+	// the drill-down lists symbols and their locations.
+	if len(a.Decls) != 2 {
+		t.Fatalf("internal/a decls = %d, want 2 (%+v)", len(a.Decls), a.Decls)
+	}
+	if a.Decls[0].Name != "A" || a.Decls[0].IsTest || a.Decls[0].LineStart != 9 {
+		t.Errorf("first decl = %+v, want A at line 9, not a test", a.Decls[0])
+	}
+	if a.Decls[1].Name != "TestA" || !a.Decls[1].IsTest {
+		t.Errorf("second decl = %+v, want the test TestA", a.Decls[1])
 	}
 
 	// An import that names no module here is a real dependency, but not an edge:
@@ -90,8 +100,8 @@ func TestStructureOfMapsModulesAndTheirDependencies(t *testing.T) {
 	if len(web.DependsOn) != 0 || len(web.Imports) != 0 {
 		t.Errorf("web depends on %v / imports %v, want neither", web.DependsOn, web.Imports)
 	}
-	if web.Files != 2 || web.Decls != 2 {
-		t.Errorf("web = %d files, %d decls, want 2/2", web.Files, web.Decls)
+	if len(web.Files) != 2 || len(web.Decls) != 2 {
+		t.Errorf("web = %d files, %d decls, want 2/2", len(web.Files), len(web.Decls))
 	}
 
 	wantEdges := []ModuleEdge{
@@ -125,6 +135,36 @@ func TestStructureOfDoesNotInventEdgesFromBrokenFiles(t *testing.T) {
 	if len(broken.DependsOn) != 0 || len(structure.Edges) != 0 {
 		t.Fatalf("a broken file invented edges: %+v", structure.Edges)
 	}
+}
+
+// A module with many declarations per file is cut, and says so: a truncated list
+// must never look complete.
+func TestStructureOfCapsDeclarationsPerFile(t *testing.T) {
+	var body strings.Builder
+	body.WriteString("package big\n")
+	for i := 0; i < maxModuleDeclsPerFile+5; i++ {
+		fmt.Fprintf(&body, "\nfunc F%d() {}\n", i)
+	}
+	structure, _ := StructureOf([]File{{Path: "internal/big/big.go", Body: []byte(body.String())}})
+	big := module(t, structure, "internal/big")
+	if len(big.Decls) != maxModuleDeclsPerFile {
+		t.Fatalf("decls = %d, want the cap %d", len(big.Decls), maxModuleDeclsPerFile)
+	}
+	if !big.Truncated {
+		t.Error("a capped module did not report the truncation")
+	}
+}
+
+func equal(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func module(t *testing.T, structure Structure, dir string) Module {

@@ -63,7 +63,7 @@ func Declarations(files []File) ([]Declaration, []model.Diagnostic) {
 			diags = append(diags, model.Diagnostic{
 				Path:    f.Path,
 				Op:      "parse",
-				Message: "language is outside the V1 set; relationships stay unknown",
+				Message: "changed file is outside the V1 language set; its declarations stay unknown",
 			})
 			continue
 		}

@@ -44,14 +44,22 @@ type Structure struct {
 // Module is one directory of source. DependsOn holds module directories resolved
 // inside this repository; Imports holds the ones that resolve nowhere here, so an
 // unresolved dependency is visible as external rather than invented as internal.
+// Symbols carry their file and line so the map can drill through to source.
 type Module struct {
 	Dir       string   `json:"dir"`
-	Files     int      `json:"files"`
-	TestFiles int      `json:"test_files"`
-	Decls     int      `json:"decls"`
-	TestDecls int      `json:"test_decls"`
+	Files     []string `json:"files"`
+	Symbols   []Symbol `json:"symbols"`
+	Truncated bool     `json:"symbols_truncated,omitempty"`
 	DependsOn []string `json:"depends_on"`
 	Imports   []string `json:"imports"`
+}
+
+// Symbol is one declaration in a module.
+type Symbol struct {
+	Name   string `json:"name"`
+	Path   string `json:"path"`
+	Line   int    `json:"line"`
+	IsTest bool   `json:"test,omitempty"`
 }
 
 // Edge is one import that resolves inside the project.
@@ -189,12 +197,15 @@ func newState(a Analyzed, freshness string, failure *Failure, cache Cache) State
 func structureOf(structure analyze.Structure) Structure {
 	out := Structure{Modules: make([]Module, len(structure.Modules)), Edges: make([]Edge, len(structure.Edges))}
 	for i, m := range structure.Modules {
+		symbols := make([]Symbol, len(m.Decls))
+		for j, d := range m.Decls {
+			symbols[j] = Symbol{Name: d.Name, Path: d.Path, Line: d.LineStart, IsTest: d.IsTest}
+		}
 		out.Modules[i] = Module{
 			Dir:       m.Dir,
-			Files:     m.Files,
-			TestFiles: m.TestFiles,
-			Decls:     m.Decls,
-			TestDecls: m.TestDecls,
+			Files:     append([]string{}, m.Files...),
+			Symbols:   symbols,
+			Truncated: m.Truncated,
 			DependsOn: append([]string{}, m.DependsOn...),
 			Imports:   append([]string{}, m.Imports...),
 		}

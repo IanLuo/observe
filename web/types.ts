@@ -57,6 +57,33 @@ export interface Baseline {
   specs: string[] | null;
 }
 
+export interface Symbol {
+  name: string;
+  path: string;
+  line: number;
+  test?: boolean;
+}
+
+export interface Module {
+  dir: string;
+  files: string[];
+  symbols: Symbol[];
+  symbols_truncated?: boolean;
+  depends_on: string[] | null;
+  imports: string[] | null;
+}
+
+export interface Edge {
+  from: string;
+  to: string;
+  import: string;
+}
+
+export interface Structure {
+  modules: Module[];
+  edges: Edge[];
+}
+
 export interface Conflict {
   spec_path: string;
   label: string;
@@ -84,6 +111,7 @@ export interface State {
   prompt_shown: boolean;
   baseline: Baseline;
   diff: { hash: string; files: DiffFile[] | null };
+  structure: Structure;
   goals: Goal[] | null;
   prompt_conflicts: Conflict[] | null;
   diagnostics: string[] | null;

@@ -24,16 +24,21 @@ type Structure struct {
 	Edges   []ModuleEdge
 }
 
-// Module is one directory of source: its size, its weight, and its dependencies.
+// Module is one directory of source: its files, the declarations in them, and its
+// dependencies.
 type Module struct {
-	Dir       string // repository-relative directory; "." for the root
-	Files     int
-	TestFiles int
-	Decls     int
-	TestDecls int
-	DependsOn []string // module directories this one imports
-	Imports   []string // imports that do not resolve to a module here
+	Dir       string        // repository-relative directory; "." for the root
+	Files     []string      // implementation and test files, in path order
+	Decls     []Declaration // capped; Truncated says so, so the view never overstates
+	DependsOn []string      // module directories this one imports
+	Imports   []string      // imports that do not resolve to a module here
+	Truncated bool
 }
+
+// maxModuleDeclsPerFile keeps one large module from flooding the payload. The view
+// shows the first declarations of a file and says the rest are cut, rather than
+// presenting a partial list as complete.
+const maxModuleDeclsPerFile = 12
 
 // ModuleEdge is one import that resolves inside the project, with the path it
 // came from as provenance.
@@ -70,11 +75,10 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 			module = &Module{Dir: dir}
 			byDir[dir] = module
 		}
-		module.Files++
+		module.Files = append(module.Files, f.Path)
 		// Tests are counted, not wired: a test file imports the test runner in every
 		// module, and that says nothing about how the project is built.
 		if isTestPath(f.Path) {
-			module.TestFiles++
 			continue
 		}
 
@@ -109,21 +113,23 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 	}
 	decls, declDiags := Declarations(sourceFiles)
 	diags = append(diags, declDiags...)
+	perFile := map[string]int{}
 	for _, d := range decls {
-		dir := moduleOf(d.Path)
-		module := byDir[dir]
+		module := byDir[moduleOf(d.Path)]
 		if module == nil {
 			continue
 		}
-		if d.IsTest {
-			module.TestDecls++
-		} else {
-			module.Decls++
+		if perFile[d.Path] >= maxModuleDeclsPerFile {
+			module.Truncated = true
+			continue
 		}
+		perFile[d.Path]++
+		module.Decls = append(module.Decls, d)
 	}
 
 	out.Modules = make([]Module, 0, len(byDir))
 	for _, module := range byDir {
+		module.Files = sortedUnique(module.Files)
 		module.DependsOn = sortedUnique(module.DependsOn)
 		module.Imports = sortedUnique(module.Imports)
 		out.Modules = append(out.Modules, *module)
