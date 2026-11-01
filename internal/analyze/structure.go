@@ -22,6 +22,24 @@ import (
 type Structure struct {
 	Modules []Module
 	Edges   []ModuleEdge
+	// FileEdges are imports that resolve to one file here, including imports inside
+	// a single module: the module graph deliberately hides those, but the drill-down
+	// inside a module is exactly that picture.
+	FileEdges []FileEdge
+}
+
+// FileEdge is a relation between two files of one project.
+//
+// Kind is "import" when one file imports another, and "reference" when one file
+// uses a symbol another file declares — the only relation two Go package files can
+// have, since they never import each other. A reference is a name match, so it is
+// labelled with the symbol and never presented as proof of anything else.
+type FileEdge struct {
+	From   string
+	To     string
+	Kind   string
+	Import string // the import path, for an import edge
+	Symbol string // the referenced name, for a reference edge
 }
 
 // Module is one directory of source: its files, the declarations in them, and its
@@ -91,7 +109,10 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 			continue
 		}
 		for _, raw := range imports {
-			if target, ok := resolveImport(raw, f.Path, moduleDirs, fileSet); ok {
+			if target, targetFile, ok := resolveImport(raw, f.Path, moduleDirs, fileSet); ok {
+				if targetFile != "" && targetFile != f.Path {
+					out.FileEdges = append(out.FileEdges, FileEdge{From: f.Path, To: targetFile, Kind: "import", Import: raw})
+				}
 				if target == dir {
 					continue // a file importing its own module is not a module edge
 				}
@@ -127,6 +148,8 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 		module.Decls = append(module.Decls, d)
 	}
 
+	out.FileEdges = append(out.FileEdges, referenceEdges(files, decls)...)
+
 	out.Modules = make([]Module, 0, len(byDir))
 	for _, module := range byDir {
 		module.Files = sortedUnique(module.Files)
@@ -135,6 +158,16 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 		out.Modules = append(out.Modules, *module)
 	}
 	sort.Slice(out.Modules, func(i, j int) bool { return out.Modules[i].Dir < out.Modules[j].Dir })
+	sort.Slice(out.FileEdges, func(i, j int) bool {
+		a, b := out.FileEdges[i], out.FileEdges[j]
+		if a.From != b.From {
+			return a.From < b.From
+		}
+		if a.To != b.To {
+			return a.To < b.To
+		}
+		return a.Symbol+a.Import < b.Symbol+b.Import
+	})
 	sort.Slice(out.Edges, func(i, j int) bool {
 		if out.Edges[i].From != out.Edges[j].From {
 			return out.Edges[i].From < out.Edges[j].From
@@ -145,6 +178,88 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 		return out.Edges[i].Import < out.Edges[j].Import
 	})
 	return out, diags
+}
+
+// maxReferencesPerFile bounds how many symbol references one file contributes, so a
+// large file cannot dominate the drill-down.
+const maxReferencesPerFile = 24
+
+// referenceEdges links a file to the files of its own module whose symbols it uses.
+//
+// A dependency between two files of one package is invisible to imports, and it is
+// the structure a reader wants when asking how a module is put together. Names are
+// matched against declarations in the same module only, so a shared identifier in
+// another module never creates an edge.
+func referenceEdges(files []File, decls []Declaration) []FileEdge {
+	// Per module, so a name declared in two modules cannot cross-link them.
+	byModule := map[string]map[string]string{}
+	for _, d := range decls {
+		dir := moduleOf(d.Path)
+		if byModule[dir] == nil {
+			byModule[dir] = map[string]string{}
+		}
+		if _, exists := byModule[dir][d.Name]; !exists {
+			byModule[dir][d.Name] = d.Path
+		}
+	}
+	var edges []FileEdge
+	for _, f := range files {
+		lang, ok := languageFor(f.Path)
+		if !ok || isTestPath(f.Path) {
+			continue
+		}
+		dir := moduleOf(f.Path)
+		names := byModule[dir]
+		if names == nil {
+			continue
+		}
+		used, err := identifiersOf(lang, f)
+		if err != nil {
+			continue
+		}
+		seen := map[string]bool{}
+		count := 0
+		for _, name := range used {
+			target, declared := names[name]
+			if !declared || target == f.Path {
+				continue
+			}
+			key := target + "\x00" + name
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			edges = append(edges, FileEdge{From: f.Path, To: target, Kind: "reference", Symbol: name})
+			count++
+			if count >= maxReferencesPerFile {
+				break
+			}
+		}
+	}
+	return edges
+}
+
+// identifiersOf lists the identifier names a file mentions.
+func identifiersOf(lang string, f File) ([]string, error) {
+	tree, err := parse(lang, f)
+	if err != nil || tree == nil {
+		return nil, err
+	}
+	defer tree.Close()
+
+	var names []string
+	var walk func(n *ts.Node)
+	walk = func(n *ts.Node) {
+		switch n.Kind() {
+		case "identifier", "type_identifier":
+			names = append(names, n.Utf8Text(f.Body))
+		}
+		for i := uint(0); i < n.NamedChildCount(); i++ {
+			walk(n.NamedChild(i))
+		}
+	}
+	walk(tree.RootNode())
+	return names, nil
 }
 
 // moduleOf is the directory a file belongs to.
@@ -161,22 +276,22 @@ func moduleOf(p string) string {
 // Go imports carry a module path (observe/internal/serve), so a module directory
 // that is the import's tail is the target. Relative imports are resolved against
 // the importing file. Anything else is external; guessing would be invention.
-func resolveImport(raw, filePath string, moduleDirs, fileSet map[string]bool) (string, bool) {
+func resolveImport(raw, filePath string, moduleDirs, fileSet map[string]bool) (module, file string, ok bool) {
 	if strings.HasPrefix(raw, "./") || strings.HasPrefix(raw, "../") {
 		target := path.Clean(path.Join(path.Dir(filePath), raw))
 		if target == ".." || strings.HasPrefix(target, "../") {
-			return "", false
+			return "", "", false
 		}
 		// A TypeScript import names a file, not a directory: "./dom" is web/dom.ts.
 		for _, candidate := range []string{target, target + ".ts", target + ".tsx", target + "/index.ts"} {
 			if fileSet[candidate] {
-				return moduleOf(candidate), true
+				return moduleOf(candidate), candidate, true
 			}
 		}
 		if moduleDirs[target] {
-			return target, true
+			return target, "", true
 		}
-		return "", false
+		return "", "", false
 	}
 
 	best := ""
@@ -191,9 +306,9 @@ func resolveImport(raw, filePath string, moduleDirs, fileSet map[string]bool) (s
 		}
 	}
 	if best == "" {
-		return "", false
+		return "", "", false
 	}
-	return best, true
+	return best, "", true
 }
 
 // importsOf lists the import paths in one file.

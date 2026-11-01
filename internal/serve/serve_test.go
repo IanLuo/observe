@@ -476,7 +476,7 @@ func TestStateCarriesTheProjectStructure(t *testing.T) {
 		t.Errorf("internal/repo files = %v, want its one file", got)
 	}
 
-	want := Edge{From: "cmd/tool", To: "internal/repo", Import: "observe/internal/repo"}
+	want := Edge{From: "cmd/tool", To: "internal/repo", Kind: "import", Import: "observe/internal/repo"}
 	found := false
 	for _, e := range st.Structure.Edges {
 		if e == want {

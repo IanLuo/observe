@@ -39,6 +39,9 @@ type State struct {
 type Structure struct {
 	Modules []Module `json:"modules"`
 	Edges   []Edge   `json:"edges"`
+	// FileEdges are the imports that stay inside one module, which the module graph
+	// hides and the drill-down draws.
+	FileEdges []Edge `json:"file_edges"`
 }
 
 // Module is one directory of source. DependsOn holds module directories resolved
@@ -62,11 +65,14 @@ type Symbol struct {
 	IsTest bool   `json:"test,omitempty"`
 }
 
-// Edge is one import that resolves inside the project.
+// Edge is one relation between two files or modules. Kind is "import" or
+// "reference"; a reference carries the symbol name that produced it.
 type Edge struct {
 	From   string `json:"from"`
 	To     string `json:"to"`
-	Import string `json:"import"`
+	Kind   string `json:"kind,omitempty"`
+	Import string `json:"import,omitempty"`
+	Symbol string `json:"symbol,omitempty"`
 }
 
 // Failure is the last refresh failure, which the view keeps visible even while
@@ -195,7 +201,11 @@ func newState(a Analyzed, freshness string, failure *Failure, cache Cache) State
 
 // structureOf maps the construction to the wire contract.
 func structureOf(structure analyze.Structure) Structure {
-	out := Structure{Modules: make([]Module, len(structure.Modules)), Edges: make([]Edge, len(structure.Edges))}
+	out := Structure{
+		Modules:   make([]Module, len(structure.Modules)),
+		Edges:     make([]Edge, len(structure.Edges)),
+		FileEdges: make([]Edge, len(structure.FileEdges)),
+	}
 	for i, m := range structure.Modules {
 		symbols := make([]Symbol, len(m.Decls))
 		for j, d := range m.Decls {
@@ -211,7 +221,10 @@ func structureOf(structure analyze.Structure) Structure {
 		}
 	}
 	for i, e := range structure.Edges {
-		out.Edges[i] = Edge{From: e.From, To: e.To, Import: e.Import}
+		out.Edges[i] = Edge{From: e.From, To: e.To, Kind: "import", Import: e.Import}
+	}
+	for i, e := range structure.FileEdges {
+		out.FileEdges[i] = Edge{From: e.From, To: e.To, Kind: e.Kind, Import: e.Import, Symbol: e.Symbol}
 	}
 	return out
 }

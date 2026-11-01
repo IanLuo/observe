@@ -22,6 +22,7 @@
 - Read-only local operation. Never execute repository code, hooks, or build scripts from an analyzed project.
 - Locked specs are the goal baseline. Task prompts and other docs are context only.
 - The project map is construction, not requirement: modules come from tracked source, and an import becomes an edge only when it names a module or file here. Everything else stays external — a guessed dependency is a lie about the architecture.
+- The map drills in place: project → module → file. Inside a module the edges are imports that stay within it, plus symbol use between its files (the only relation two files of one Go package have). A symbol-use edge is a name match inside one module, so it never crosses a package boundary and is never proof of a call.
 - Analyzer evidence must carry provenance. Unknown stays unknown; code presence alone is not verification.
 - Persistent state is only a replaceable current-analysis cache outside the repository. No history snapshots.
 - All application access binds to loopback only; no LAN exposure.

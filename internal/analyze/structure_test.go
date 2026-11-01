@@ -94,6 +94,18 @@ func TestStructureOfMapsModulesAndTheirDependencies(t *testing.T) {
 		t.Errorf("internal/a external imports = %v, want [net/http]", a.Imports)
 	}
 
+	// The drill-down needs the imports that stay inside a module, which the module
+	// graph hides: web/main.ts imports web/render.ts.
+	var fileEdges []string
+	for _, e := range structure.FileEdges {
+		if e.Kind == "import" {
+			fileEdges = append(fileEdges, e.From+" -> "+e.To)
+		}
+	}
+	if !equal(fileEdges, []string{"web/main.ts -> web/render.ts"}) {
+		t.Errorf("file edges = %v, want web/main.ts -> web/render.ts", fileEdges)
+	}
+
 	// A relative TypeScript import names a file inside its own module, so it is
 	// neither a module edge nor an external dependency: the UI is one module.
 	web := module(t, structure, "web")
@@ -176,4 +188,37 @@ func module(t *testing.T, structure Structure, dir string) Module {
 	}
 	t.Fatalf("no module %q in %+v", dir, structure.Modules)
 	return Module{}
+}
+
+// Two files in one Go package never import each other, so the only structure
+// between them is symbol use. That relation is what the drill-down inside a module
+// draws, and it stays inside the module.
+func TestStructureOfLinksFilesBySymbolReference(t *testing.T) {
+	files := []File{
+		{Path: "internal/a/types.go", Body: []byte("package a\n\ntype Thing struct{}\n\nfunc (Thing) Use() {}\n")},
+		{Path: "internal/a/user.go", Body: []byte("package a\n\nfunc User() Thing { return Thing{} }\n")},
+		{Path: "internal/b/other.go", Body: []byte("package b\n\nfunc Other() { _ = User }\n")},
+	}
+	structure, diags := StructureOf(files)
+	if len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %+v", diags)
+	}
+
+	var refs []string
+	for _, edge := range structure.FileEdges {
+		if edge.Kind == "reference" {
+			refs = append(refs, edge.From+" -> "+edge.To+" ("+edge.Symbol+")")
+		}
+	}
+	if !equal(refs, []string{"internal/a/user.go -> internal/a/types.go (Thing)"}) {
+		t.Fatalf("reference edges = %v, want user.go -> types.go (Thing)", refs)
+	}
+
+	// internal/b mentions User, which is declared in another module: that is not a
+	// file relation, and inventing one would cross a package boundary.
+	for _, edge := range structure.FileEdges {
+		if edge.From == "internal/b/other.go" {
+			t.Fatalf("a cross-module reference was drawn: %+v", edge)
+		}
+	}
 }

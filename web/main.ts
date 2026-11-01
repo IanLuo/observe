@@ -3,7 +3,7 @@
 
 import { Envelope, State } from "./types";
 import { dirOf, renderMap } from "./map";
-import { renderModuleDetail, renderProject } from "./project";
+import { renderFileDetail, renderMapBar, renderModuleDetail, renderProject } from "./project";
 import {
   renderBaseline,
   renderConflicts,
@@ -20,6 +20,8 @@ interface View {
   state: State | null;
   /** mode decides which map is drawn; the project is the default view. */
   mode: "project" | "goals";
+  /** focus is the module the map has drilled into; null is the whole project. */
+  focus: string | null;
   selected: string | null;
   expanded: Set<string>;
   showDiff: boolean;
@@ -30,6 +32,7 @@ interface View {
 const view: View = {
   state: null,
   mode: "project",
+  focus: null,
   selected: null,
   expanded: new Set<string>(),
   showDiff: true,
@@ -43,6 +46,7 @@ const nodes = {
   rail: byId("rail"),
   diff: byId("diff"),
   map: byId("map"),
+  mapbar: byId("mapbar"),
   detail: byId("detail"),
   conflicts: byId("conflicts"),
   footer: byId("footer"),
@@ -68,7 +72,13 @@ const handlers = {
   onClearCache: () => void mutate("/api/cache/clear"),
   onMode: (mode: "project" | "goals") => {
     view.mode = mode;
+    view.focus = null;
     view.selected = null;
+    render();
+  },
+  onFocus: (dir: string | null) => {
+    view.focus = dir;
+    if (dir === null) view.selected = null;
     render();
   },
   onToggleDiff: () => {
@@ -96,7 +106,8 @@ function render(): void {
   renderBaseline(nodes.baseline, state);
   renderRail(nodes.rail, state, view.selected, handlers);
   renderDiff(nodes.diff, state, view.showDiff, handlers);
-  if (view.selected?.startsWith("m:")) renderModuleDetail(nodes.detail, state, view.selected.slice(2));
+  if (view.selected?.startsWith("s:")) renderFileDetail(nodes.detail, state, view.selected.slice(2));
+  else if (view.selected?.startsWith("m:")) renderModuleDetail(nodes.detail, state, view.selected.slice(2));
   else renderDetail(nodes.detail, state, view.selected);
   renderConflicts(nodes.conflicts, state);
   renderFooter(nodes.footer, state);
@@ -104,10 +115,19 @@ function render(): void {
   const buttons = nodes.header.querySelectorAll("button");
   if (view.pending) for (const button of buttons) button.disabled = true;
 
+  renderMapBar(nodes.mapbar, {
+    mode: view.mode,
+    focus: view.focus,
+    onMode: handlers.onMode,
+    onFocus: handlers.onFocus,
+  });
+
   if (view.mode === "project") {
     renderProject(nodes.map, state, {
       selected: view.selected,
+      focus: view.focus,
       onSelect: handlers.onSelect,
+      onFocus: handlers.onFocus,
       mode: view.mode,
       onMode: handlers.onMode,
     });
@@ -131,6 +151,9 @@ function render(): void {
 function selectionExists(state: State, key: string): boolean {
   const value = key.slice(2);
   if (key.startsWith("m:")) return (state.structure?.modules ?? []).some((module) => module.dir === value);
+  if (key.startsWith("s:")) {
+    return (state.structure?.modules ?? []).some((module) => (module.files ?? []).includes(value));
+  }
   if (key.startsWith("f:")) return (state.diff.files ?? []).some((file) => file.path === value);
   if (key.startsWith("a:")) {
     return (state.goals ?? []).some((goal) => (goal.evidence ?? []).some((ref) => dirOf(ref.path) === value));
@@ -171,10 +194,12 @@ async function mutate(path: string): Promise<void> {
 }
 
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && view.selected) {
-    view.selected = null;
-    render();
-  }
+  if (event.key !== "Escape") return;
+  // Escape walks back out one level: the file, then the module, then nothing.
+  if (view.selected) view.selected = null;
+  else if (view.focus) view.focus = null;
+  else return;
+  render();
 });
 
 void load();

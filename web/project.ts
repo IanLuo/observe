@@ -14,11 +14,17 @@ export const moduleKey = (dir: string): string => "m:" + dir;
 
 export interface ProjectOptions {
   selected: string | null;
+  /** focus is the module whose inside is on screen; null shows the whole project. */
+  focus: string | null;
   onSelect: (key: string | null) => void;
+  onFocus: (dir: string | null) => void;
   /** onMode switches between the project map and the goal map. */
   mode: "project" | "goals";
   onMode: (mode: "project" | "goals") => void;
 }
+
+/** fileKey is the selection key for one source file inside a module. */
+export const fileKey = (path: string): string => "s:" + path;
 
 interface Layer {
   depth: number;
@@ -90,7 +96,12 @@ export function renderProject(container: HTMLElement, state: State, opts: Projec
   const edges = state.structure?.edges ?? [];
 
   clear(container);
-  container.append(toggle(opts));
+
+  const focused = opts.focus ? modules.find((m) => m.dir === opts.focus) : undefined;
+  if (focused) {
+    renderFileMap(container, state, focused, opts);
+    return;
+  }
 
   if (modules.length === 0) {
     container.append(
@@ -152,11 +163,208 @@ export function renderProject(container: HTMLElement, state: State, opts: Projec
   for (const module of modules) {
     const box = boxes.get(module.dir);
     if (!box) continue;
-    nodeLayer.append(node(module, box, opts.selected === moduleKey(module.dir), opts.onSelect));
+    nodeLayer.append(node(module, box, opts.selected === moduleKey(module.dir), opts));
   }
 
   container.append(svg);
   container.append(legend(modules, edges.length));
+}
+
+/**
+ * renderFileMap draws one module from the inside: its files, the imports that stay
+ * within it, and their symbols. This is the level at which "how is this built"
+ * becomes concrete, so it is a diagram rather than a list.
+ */
+function renderFileMap(container: HTMLElement, state: State, module: Module, opts: ProjectOptions): void {
+  if (module.files.length === 0) {
+    container.append(el("p", { class: "empty map-empty", text: "This module has no source files." }));
+    return;
+  }
+
+  const inside = new Set(module.files);
+  const raw = (state.structure?.file_edges ?? []).filter((e) => inside.has(e.from) && inside.has(e.to));
+  // One line per pair of files: several symbols used from the same file are one
+  // relation, and drawing them as parallel curves makes the picture unreadable.
+  const edges: { from: string; to: string; kind: "import" | "reference"; labels: string[] }[] = [];
+  for (const edge of raw) {
+    const label = edge.kind === "reference" ? (edge.symbol ?? "") : (edge.import ?? "");
+    const existing = edges.find((e) => e.from === edge.from && e.to === edge.to);
+    if (existing) {
+      if (edge.kind === "import") existing.kind = "import";
+      if (label) existing.labels.push(label);
+      continue;
+    }
+    edges.push({ from: edge.from, to: edge.to, kind: edge.kind ?? "import", labels: label ? [label] : [] });
+  }
+  const deps = new Map<string, string[]>();
+  for (const path of module.files) deps.set(path, []);
+  for (const edge of edges) deps.get(edge.from)?.push(edge.to);
+
+  // Files are ordered by how deep their dependency chain is, then by name, and laid
+  // out in rows: deep dependencies end up below the files that import them.
+  const depth = new Map<string, number>();
+  const walk = (path: string, seen: Set<string>): number => {
+    const known = depth.get(path);
+    if (known != null) return known;
+    if (seen.has(path)) return 0;
+    seen.add(path);
+    let value = 0;
+    for (const dep of deps.get(path) ?? []) value = Math.max(value, walk(dep, seen) + 1);
+    depth.set(path, value);
+    return value;
+  };
+  for (const path of module.files) walk(path, new Set<string>());
+
+  const symbolsOf = (path: string): Symbol[] => module.symbols.filter((s) => s.path === path);
+  const ordered = [...module.files].sort((a, b) => {
+    const byDepth = (depth.get(b) ?? 0) - (depth.get(a) ?? 0);
+    return byDepth !== 0 ? byDepth : a.localeCompare(b);
+  });
+
+  const COLS = Math.min(4, ordered.length);
+  const W = 210;
+  const H = 46;
+  const GAP = 26;
+  const PAD = 16;
+  const rows = Math.ceil(ordered.length / COLS);
+  const width = PAD * 2 + COLS * W + (COLS - 1) * GAP;
+  const height = PAD * 2 + rows * H + (rows - 1) * GAP;
+
+  const boxes = new Map<string, { x: number; y: number; row: number }>();
+  ordered.forEach((path, index) => {
+    const row = Math.floor(index / COLS);
+    const col = index % COLS;
+    // The last row is centred so the picture does not lean left.
+    const inRow = Math.min(COLS, ordered.length - row * COLS);
+    const offset = ((COLS - inRow) * (W + GAP)) / 2;
+    boxes.set(path, { x: PAD + offset + col * (W + GAP), y: PAD + row * (H + GAP), row });
+  });
+
+  const svg = svgEl("svg", "project-map file-map");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("role", "group");
+  svg.setAttribute("aria-label", `${module.dir}: files and their imports`);
+  const edgeLayer = svgEl("g", "edges");
+  const nodeLayer = svgEl("g", "nodes");
+  svg.append(edgeLayer, nodeLayer);
+
+  for (const edge of edges) {
+    const from = boxes.get(edge.from);
+    const to = boxes.get(edge.to);
+    if (!from || !to) continue;
+    const path = svgEl("path", "edge");
+    if (from.row === to.row) {
+      // Same row: leave the right side and enter the left side, so the line does not
+      // loop back over its own node.
+      const right = from.x + W;
+      const leftTo = to.x;
+      path.setAttribute("d", `M ${right} ${from.y + H / 2} C ${right + GAP / 2} ${from.y + H / 2}, ${leftTo - GAP / 2} ${to.y + H / 2}, ${leftTo} ${to.y + H / 2}`);
+    } else {
+      const x1 = from.x + W / 2;
+      const y1 = from.y + H;
+      const x2 = to.x + W / 2;
+      const y2 = to.y;
+      const mid = (y1 + y2) / 2;
+      path.setAttribute("d", `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`);
+    }
+    if (edge.kind === "reference") path.setAttribute("class", "edge ref");
+    const title = svgEl("title");
+    title.textContent =
+      edge.kind === "import"
+        ? `${edge.from} imports ${edge.labels.join(", ")}`
+        : `${edge.from} uses ${edge.labels.join(", ")} from ${edge.to}`;
+    path.append(title);
+    edgeLayer.append(path);
+  }
+
+  for (const path of ordered) {
+    const box = boxes.get(path);
+    if (!box) continue;
+    nodeLayer.append(fileNode(path, box, symbolsOf(path), opts.selected === fileKey(path), opts.onSelect));
+  }
+
+  container.append(svg);
+  const testFiles = module.files.filter((p) => /(\.test\.tsx?|\.spec\.tsx?|_test\.go)$/.test(p)).length;
+  const imports = edges.filter((e) => e.kind === "import").length;
+  const references = edges.length - imports;
+  container.append(
+    el("p", {
+      class: "legend",
+      text:
+        `${module.files.length} files · ${module.symbols.length} symbols · ${testFiles} test file${testFiles === 1 ? "" : "s"} · ` +
+        `${imports} ${imports === 1 ? "import" : "imports"} (solid) · ${references} ${references === 1 ? "symbol use" : "symbol uses"} (dashed)`,
+    }),
+  );
+}
+
+/** fileNode draws one file with its symbol count; selecting it shows its symbols. */
+function fileNode(
+  path: string,
+  box: { x: number; y: number },
+  symbols: Symbol[],
+  selected: boolean,
+  onSelect: (key: string | null) => void,
+): SVGElement {
+  const group = svgEl("g", "module file" + (selected ? " selected" : ""));
+  group.setAttribute("transform", `translate(${box.x} ${box.y})`);
+  group.setAttribute("tabindex", "0");
+  group.setAttribute("role", "button");
+  const name = path.split("/").pop() ?? path;
+  const tests = symbols.filter((s) => s.test).length;
+  group.setAttribute("aria-label", `${path}: ${symbols.length - tests} symbols, ${tests} test symbols`);
+
+  const rect = svgEl("rect", "module-box");
+  rect.setAttribute("width", "210");
+  rect.setAttribute("height", "46");
+  rect.setAttribute("rx", "8");
+  group.append(rect);
+
+  const label = svgEl("text", "module-name");
+  label.setAttribute("x", "12");
+  label.setAttribute("y", "20");
+  label.textContent = name;
+  group.append(label);
+
+  const meta = svgEl("text", "module-meta");
+  meta.setAttribute("x", "12");
+  meta.setAttribute("y", "36");
+  meta.textContent = `${Math.max(0, symbols.length - tests)} symbols` + (tests ? ` · ${tests} test` : "");
+  group.append(meta);
+
+  const title = svgEl("title");
+  title.textContent = [path, ...symbols.slice(0, 12).map((s) => `  ${s.name}:${s.line}`)].join("\n");
+  group.append(title);
+
+  const activate = (): void => onSelect(fileKey(path));
+  group.addEventListener("click", activate);
+  group.addEventListener("keydown", (event) => {
+    if ((event as KeyboardEvent).key === "Enter" || (event as KeyboardEvent).key === " ") {
+      event.preventDefault();
+      activate();
+    }
+  });
+  return group;
+}
+
+/**
+ * renderMapBar draws the breadcrumb and the view toggle.
+ *
+ * It lives outside the two maps because the toggle must stay reachable from both:
+ * rendering it inside the project map made the goal map a one-way door.
+ */
+export function renderMapBar(
+  container: HTMLElement,
+  opts: { mode: "project" | "goals"; focus: string | null; onMode: (mode: "project" | "goals") => void; onFocus: (dir: string | null) => void },
+): void {
+  clear(container);
+  const project = el("button", { class: "crumb" + (opts.focus ? "" : " on"), text: "Project" });
+  project.addEventListener("click", () => opts.onFocus(null));
+  container.append(project);
+  if (opts.focus) {
+    container.append(el("span", { class: "crumb-sep", text: "›" }));
+    container.append(el("span", { class: "crumb on", text: opts.focus }));
+  }
+  container.append(toggle(opts));
 }
 
 /** metaText is the second line of a node: weight, tests, and outside dependencies. */
@@ -180,7 +388,7 @@ function node(
   module: Module,
   box: { x: number; y: number; w: number },
   selected: boolean,
-  onSelect: (key: string | null) => void,
+  opts: ProjectOptions,
 ): SVGElement {
   const group = svgEl("g", "module" + (selected ? " selected" : ""));
   group.setAttribute("transform", `translate(${box.x} ${box.y})`);
@@ -216,7 +424,12 @@ function node(
     .join("\n");
   group.append(title);
 
-  const activate = (): void => onSelect(moduleKey(module.dir));
+  // Selecting a module shows its detail and takes the map inside it: the whole
+  // project is only the picture you start from.
+  const activate = (): void => {
+    opts.onSelect(moduleKey(module.dir));
+    opts.onFocus(module.dir);
+  };
   group.addEventListener("click", activate);
   group.addEventListener("keydown", (event) => {
     if ((event as KeyboardEvent).key === "Enter" || (event as KeyboardEvent).key === " ") {
@@ -263,6 +476,67 @@ function symbolText(symbols: Symbol[]): string {
   const shown = symbols.slice(0, visibleSymbols).map((s) => `${s.name}:${s.line}${s.test ? " (test)" : ""}`);
   const rest = symbols.length - shown.length;
   return shown.join("  ") + (rest > 0 ? `  +${rest} more` : "");
+}
+
+/**
+ * renderFileDetail lists one file's symbols with their lines, and the imports that
+ * point at it and away from it, so a node in the diagram resolves to source.
+ */
+export function renderFileDetail(container: HTMLElement, state: State, path: string): void {
+  clear(container);
+  container.scrollTop = 0;
+
+  const module = (state.structure?.modules ?? []).find((m) => (m.files ?? []).includes(path));
+  const symbols = (module?.symbols ?? []).filter((s) => s.path === path);
+  container.append(el("h2", { text: path.split("/").pop() ?? path }));
+  container.append(el("div", { class: "crumbs", text: module ? module.dir + " › " : "" }));
+  if (!module) {
+    container.append(el("p", { class: "empty", text: "That file is no longer in the analysis." }));
+    return;
+  }
+  container.append(
+    el("p", {
+      class: "muted",
+      text: `${symbols.filter((s) => !s.test).length} symbols · ${symbols.filter((s) => s.test).length} test symbols`,
+    }),
+  );
+
+  const list = el("ul", { class: "files" });
+  for (const symbol of symbols) {
+    list.append(el("li", { class: "file-path", text: `${symbol.name}:${symbol.line}${symbol.test ? " (test)" : ""}` }));
+  }
+  container.append(list);
+  if (symbols.length === 0) container.append(el("p", { class: "muted", text: "No declarations in this file." }));
+
+  const edges = state.structure?.file_edges ?? [];
+  const imports = edges.filter((e) => e.from === path && e.kind !== "reference");
+  const uses = edges.filter((e) => e.from === path && e.kind === "reference");
+  const importedBy = edges.filter((e) => e.to === path && e.kind !== "reference");
+  const usedBy = edges.filter((e) => e.to === path && e.kind === "reference");
+  if (imports.length) {
+    container.append(el("h3", { text: "Imports" }));
+    const deps = el("ul", { class: "deps" });
+    for (const edge of imports) deps.append(el("li", { text: `${edge.import} → ${edge.to}` }));
+    container.append(deps);
+  }
+  if (uses.length) {
+    container.append(el("h3", { text: "Uses from this module" }));
+    const deps = el("ul", { class: "deps" });
+    for (const edge of uses) deps.append(el("li", { text: `${edge.symbol} → ${edge.to}` }));
+    container.append(deps);
+  }
+  if (importedBy.length) {
+    container.append(el("h3", { text: "Imported by" }));
+    const users = el("ul", { class: "deps" });
+    for (const edge of importedBy) users.append(el("li", { text: edge.from }));
+    container.append(users);
+  }
+  if (usedBy.length) {
+    container.append(el("h3", { text: "Used by" }));
+    const users = el("ul", { class: "deps" });
+    for (const edge of usedBy) users.append(el("li", { text: `${edge.from} (${edge.symbol})` }));
+    container.append(users);
+  }
 }
 
 /**

@@ -76,12 +76,15 @@ export interface Module {
 export interface Edge {
   from: string;
   to: string;
-  import: string;
+  kind?: "import" | "reference";
+  import?: string;
+  symbol?: string;
 }
 
 export interface Structure {
   modules: Module[];
   edges: Edge[];
+  file_edges: Edge[];
 }
 
 export interface Conflict {
