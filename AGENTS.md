@@ -4,12 +4,14 @@
 
 - Product goal and acceptance contract: `.agents/specs/observe-progress-view.md` (locked).
 - System boundaries, data, interfaces, failure, and scale: `.agents/specs/system-design.md` (locked).
-- Repository structure and load-bearing rationale: `.agents/specs/architecture.md` (to be locked).
+- Repository structure and load-bearing rationale: `.agents/specs/architecture.md` (locked).
 - Visual tokens and interface states: `.agents/specs/design-system.md` (locked).
 
 ## How to run / build / test
 
-- N/A: implementation has not started; add verified commands when the first implementation lands.
+- `nix develop --command sh -c 'go build ./... && go vet ./... && go test ./... -count=1 && gofmt -l .'` — build, vet, test, format check.
+- `nix develop --command go run ./cmd/observe <repository>` — print what the reader and goal baseline see for a repository.
+- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline and requirement extraction), `cmd/observe`. The remaining packages in the elevator below are designed, not built.
 
 ## Hot invariants
 
