@@ -160,34 +160,88 @@ func (r *Repo) LockedSpecs() ([]SpecFile, error) {
 	return specs, nil
 }
 
-// WorkingTree returns the changed paths and the hash of the selected diff.
+// Change is one path in the selected diff, with the content needed to attribute
+// a change to the code it touched.
 //
-// Only the hash leaves this function: the diff itself is never stored or
-// persisted (.agents/specs/observe-progress-view.md, Data requirements). The
-// hash covers both the status listing and the diff text so that a change which
-// alters either is visible in the fingerprint.
-func (r *Repo) WorkingTree() (paths []string, hash string, err error) {
+// The bodies are in-memory only: nothing here is stored or persisted
+// (.agents/specs/observe-progress-view.md, Data requirements; AC12). A body is
+// nil when that side of the change does not exist, so a deleted file has no New
+// and an added one has no Old. Reading both sides is what lets the analyzer
+// notice that a change removed the declaration a goal rests on; the diff alone
+// cannot show that, because a removed declaration is absent from the working
+// tree.
+type Change struct {
+	Path   string
+	Status string // porcelain v1 XY code: " M" modified, "A " added, " D" deleted, "??" untracked, "R " renamed
+	Diff   string // unified diff for this path; empty when git has none to show
+	Old    []byte // content at HEAD; nil when the path did not exist there
+	New    []byte // content in the working tree; nil when the file is gone
+}
+
+// Changes returns the selected diff split by changed path, plus its hash.
+//
+// Only the hash is durable; the diff and both bodies are transient
+// (.agents/specs/observe-progress-view.md, Data requirements). The hash covers
+// the status listing and every per-path diff, so a change that alters either is
+// visible in the input fingerprint.
+//
+// Every git invocation here is a fixed read-only query. --no-ext-diff and
+// --no-textconv keep a repository's configured diff driver from running.
+func (r *Repo) Changes() ([]Change, string, error) {
 	out, err := r.git("status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return nil, "", err
 	}
-	paths = statusPaths(out)
-
 	commit, err := r.Commit()
 	if err != nil {
 		return nil, "", err
 	}
-	var diff []byte
-	if commit != "" {
-		// --no-ext-diff and --no-textconv keep a repository's configured diff
-		// driver from running.
-		if diff, err = r.git("diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color"); err != nil {
-			return nil, "", err
+
+	hashInput := append([]byte{}, out...)
+	changes := make([]Change, 0, len(statusEntries(out)))
+	for _, e := range statusEntries(out) {
+		c := Change{Path: e.path, Status: e.code}
+		untracked := e.code == "??"
+
+		if commit != "" && !untracked {
+			diff, err := r.git("diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color", "--", e.path)
+			if err != nil {
+				return nil, "", err
+			}
+			c.Diff = string(diff)
+
+			// A staged add has no HEAD version, so asking for one is a request
+			// for a path that never existed. Every other status code implies the
+			// path did exist, and a failure there is a real read error rather than
+			// an absence.
+			if !strings.Contains(e.code, "A") {
+				oldPath := e.path
+				if e.orig != "" {
+					oldPath = e.orig // a rename's pre-image lives at the old path
+				}
+				old, err := r.git("show", "HEAD:"+oldPath)
+				if err != nil {
+					return nil, "", err
+				}
+				c.Old = old
+			}
 		}
+
+		if !strings.Contains(e.code, "D") {
+			body, err := r.ReadFile(e.path)
+			if err != nil {
+				return nil, "", err
+			}
+			c.New = body
+		}
+
+		hashInput = append(append(hashInput, []byte(c.Path)...), []byte(c.Diff)...)
+		changes = append(changes, c)
 	}
 
-	sum := sha256.Sum256(append(append([]byte{}, out...), diff...))
-	return paths, hex.EncodeToString(sum[:]), nil
+	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
+	sum := sha256.Sum256(hashInput)
+	return changes, hex.EncodeToString(sum[:]), nil
 }
 
 // ParseLock reads the lock marker of a document. The marker must be its first
@@ -234,21 +288,30 @@ func splitNUL(out []byte) []string {
 	return paths
 }
 
-// statusPaths extracts changed paths from `git status --porcelain=v1 -z`. A
-// rename or copy entry is followed by the original path as its own field, which
-// is skipped rather than counted as another change.
-func statusPaths(out []byte) []string {
-	var paths []string
+// statusEntry is one record of `git status --porcelain=v1 -z`.
+type statusEntry struct {
+	code string // XY
+	path string
+	orig string // original path of a rename or copy; empty otherwise
+}
+
+// statusEntries parses `git status --porcelain=v1 -z`. A rename or copy entry is
+// followed by the original path in its own field: recording it as the pre-image
+// keeps it from being read as another changed path.
+func statusEntries(out []byte) []statusEntry {
+	var entries []statusEntry
 	fields := splitNUL(out)
 	for i := 0; i < len(fields); i++ {
-		entry := fields[i]
-		if len(entry) < 4 {
+		field := fields[i]
+		if len(field) < 4 {
 			continue
 		}
-		paths = append(paths, entry[3:])
-		if entry[0] == 'R' || entry[0] == 'C' {
-			i++ // the original path
+		e := statusEntry{code: field[:2], path: field[3:]}
+		if strings.ContainsAny(e.code, "RC") && i+1 < len(fields) {
+			e.orig = fields[i+1]
+			i++
 		}
+		entries = append(entries, e)
 	}
-	return paths
+	return entries
 }

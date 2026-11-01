@@ -111,6 +111,15 @@ type GoalAssessment struct {
 	Diagnostics          []Diagnostic
 }
 
+// PromptConflict is a task-prompt statement that contradicts a locked goal. The
+// locked spec stays the baseline and the conflict is left unresolved: the prompt
+// is supporting context and never overrides a spec (AC5).
+type PromptConflict struct {
+	Locator    GoalLocator
+	Prompt     string // the contradicting prompt sentence, quoted
+	Diagnostic string // what the rule compared, for the user to judge
+}
+
 // SpecBaseline is the goal baseline read from the repository's locked specs.
 type SpecBaseline struct {
 	State       BaselineState

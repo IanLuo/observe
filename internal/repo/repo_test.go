@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -68,28 +69,93 @@ func TestReadFileRefusesPathsOutsideTheRepository(t *testing.T) {
 	}
 }
 
-func TestWorkingTreeReportsChangedPathsAndAHashOfTheDiff(t *testing.T) {
+func TestChangesHashTracksTheSelectedDiff(t *testing.T) {
 	dir := newRepo(t, map[string]string{"a.txt": "a\n"})
 	r := openRepo(t, dir)
 
-	paths, before, err := r.WorkingTree()
+	changes, before, err := r.Changes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(paths) != 0 || before == "" {
-		t.Fatalf("clean tree: paths=%v hash=%q", paths, before)
+	if len(changes) != 0 || before == "" {
+		t.Fatalf("clean tree: changes=%+v hash=%q", changes, before)
 	}
 
 	writeFile(t, dir, "a.txt", "a changed\n")
-	paths, after, err := r.WorkingTree()
+	changes, after, err := r.Changes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(paths, []string{"a.txt"}) {
-		t.Fatalf("changed paths = %v, want [a.txt]", paths)
+	if len(changes) != 1 || changes[0].Path != "a.txt" {
+		t.Fatalf("changes = %+v, want [a.txt]", changes)
 	}
 	if after == before {
 		t.Fatal("diff hash did not change after the working tree changed")
+	}
+}
+
+// Changes attributes the diff to each changed path, including the content on both
+// sides, so a change can be judged against the code it touched.
+func TestChangesAttributesTheDiffToEachPath(t *testing.T) {
+	dir := newRepo(t, map[string]string{
+		"a.txt": "a\n",
+		"b.txt": "b\n",
+	})
+	writeFile(t, dir, "a.txt", "a changed\n")
+	writeFile(t, dir, "untracked.txt", "new\n")
+
+	r := openRepo(t, dir)
+	changes, hash, err := r.Changes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hash == "" {
+		t.Fatal("empty diff hash")
+	}
+	if len(changes) != 2 {
+		t.Fatalf("changes = %+v, want two paths", changes)
+	}
+	if changes[0].Path != "a.txt" || changes[1].Path != "untracked.txt" {
+		t.Fatalf("changes are not sorted by path: %q, %q", changes[0].Path, changes[1].Path)
+	}
+
+	a := changes[0]
+	if !strings.Contains(a.Diff, "-a") || !strings.Contains(a.Diff, "+a changed") {
+		t.Errorf("diff not attributed to a.txt: %q", a.Diff)
+	}
+	if string(a.Old) != "a\n" || string(a.New) != "a changed\n" {
+		t.Errorf("wrong sides for a.txt: old=%q new=%q", a.Old, a.New)
+	}
+
+	// An untracked path has no HEAD version and no working-tree diff; its body is
+	// the whole change.
+	u := changes[1]
+	if u.Status != "??" || u.Old != nil || u.Diff != "" {
+		t.Errorf("untracked change = %+v", u)
+	}
+	if string(u.New) != "new\n" {
+		t.Errorf("untracked body = %q", u.New)
+	}
+}
+
+func TestChangesReportsADeletedFileWithNoNewSide(t *testing.T) {
+	dir := newRepo(t, map[string]string{"gone.txt": "bye\n"})
+	if err := os.Remove(filepath.Join(dir, "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	changes, _, err := openRepo(t, dir).Changes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) != 1 {
+		t.Fatalf("changes = %+v", changes)
+	}
+	if changes[0].New != nil {
+		t.Errorf("deleted file has a new side: %q", changes[0].New)
+	}
+	if string(changes[0].Old) != "bye\n" {
+		t.Errorf("old side = %q, want the HEAD content", changes[0].Old)
 	}
 }
 
@@ -112,7 +178,7 @@ func TestReadOnlySessionLeavesRepositoryUnchanged(t *testing.T) {
 	if _, err := r.TrackedFiles(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.WorkingTree(); err != nil {
+	if _, _, err := r.Changes(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.LockedSpecs(); err != nil {
@@ -150,8 +216,8 @@ func TestCommitIsEmptyForARepositoryWithoutCommits(t *testing.T) {
 	if commit != "" {
 		t.Fatalf("commit = %q, want empty", commit)
 	}
-	if _, _, err := r.WorkingTree(); err != nil {
-		t.Fatalf("WorkingTree on an unborn branch: %v", err)
+	if _, _, err := r.Changes(); err != nil {
+		t.Fatalf("Changes on an unborn branch: %v", err)
 	}
 }
 
