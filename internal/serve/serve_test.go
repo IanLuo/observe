@@ -437,3 +437,50 @@ func TestPackageHasNoOutboundClient(t *testing.T) {
 		}
 	}
 }
+
+// The project's construction is part of the view: modules, the modules they import,
+// and the imports that resolve nowhere here. It survives a missing baseline,
+// because how a project is built does not depend on a spec (AC7).
+func TestStateCarriesTheProjectStructure(t *testing.T) {
+	dir := fixtureRepo(t, map[string]string{
+		"cmd/tool/main.go":      "package main\n\nimport \"observe/internal/repo\"\n\nfunc main() { repo.Open() }\n",
+		"internal/repo/repo.go": "package repo\n\nimport \"net/http\"\n\nfunc Open() { _ = http.MethodGet }\n",
+	})
+	s := newServer(t, dir, "")
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	st := state(t, s)
+	if st.Baseline.State != "missing" {
+		t.Fatalf("baseline = %q, want missing: the structure check must not need a spec", st.Baseline.State)
+	}
+
+	modules := map[string]Module{}
+	for _, m := range st.Structure.Modules {
+		modules[m.Dir] = m
+	}
+	if len(modules) != 2 {
+		t.Fatalf("modules = %+v, want cmd/tool and internal/repo", st.Structure.Modules)
+	}
+	if got := modules["internal/repo"].Imports; len(got) != 1 || got[0] != "net/http" {
+		t.Errorf("internal/repo imports = %v, want [net/http]", got)
+	}
+	if got := modules["cmd/tool"].DependsOn; len(got) != 1 || got[0] != "internal/repo" {
+		t.Errorf("cmd/tool depends on %v, want [internal/repo]", got)
+	}
+	if got := modules["internal/repo"].Decls; got != 1 {
+		t.Errorf("internal/repo decls = %d, want 1", got)
+	}
+
+	want := Edge{From: "cmd/tool", To: "internal/repo", Import: "observe/internal/repo"}
+	found := false
+	for _, e := range st.Structure.Edges {
+		if e == want {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("edges = %+v, want one %+v", st.Structure.Edges, want)
+	}
+}

@@ -26,10 +26,39 @@ type State struct {
 	PromptShown bool       `json:"prompt_shown"`
 	Baseline    Baseline   `json:"baseline"`
 	Diff        Diff       `json:"diff"`
+	Structure   Structure  `json:"structure"`
 	Goals       []Goal     `json:"goals"`
 	Conflicts   []Conflict `json:"prompt_conflicts"`
 	Diagnostics []string   `json:"diagnostics"`
 	Cache       Cache      `json:"cache"`
+}
+
+// Structure is the project as built, not as required: modules, what each depends
+// on, and what it pulls in from outside. It is available without a goal baseline,
+// because construction does not depend on a spec (AC7).
+type Structure struct {
+	Modules []Module `json:"modules"`
+	Edges   []Edge   `json:"edges"`
+}
+
+// Module is one directory of source. DependsOn holds module directories resolved
+// inside this repository; Imports holds the ones that resolve nowhere here, so an
+// unresolved dependency is visible as external rather than invented as internal.
+type Module struct {
+	Dir       string   `json:"dir"`
+	Files     int      `json:"files"`
+	TestFiles int      `json:"test_files"`
+	Decls     int      `json:"decls"`
+	TestDecls int      `json:"test_decls"`
+	DependsOn []string `json:"depends_on"`
+	Imports   []string `json:"imports"`
+}
+
+// Edge is one import that resolves inside the project.
+type Edge struct {
+	From   string `json:"from"`
+	To     string `json:"to"`
+	Import string `json:"import"`
 }
 
 // Failure is the last refresh failure, which the view keeps visible even while
@@ -133,6 +162,7 @@ func newState(a Analyzed, freshness string, failure *Failure, cache Cache) State
 			Hash:  a.Snapshot.Fingerprint.DiffHash,
 			Files: diffFiles(a.Changes),
 		},
+		Structure:   structureOf(a.Structure),
 		Goals:       goals(a.Snapshot.Assessments, freshness),
 		Diagnostics: messages(a.Snapshot.Diagnostics),
 		Cache:       cache,
@@ -153,6 +183,26 @@ func newState(a Analyzed, freshness string, failure *Failure, cache Cache) State
 		})
 	}
 	return state
+}
+
+// structureOf maps the construction to the wire contract.
+func structureOf(structure analyze.Structure) Structure {
+	out := Structure{Modules: make([]Module, len(structure.Modules)), Edges: make([]Edge, len(structure.Edges))}
+	for i, m := range structure.Modules {
+		out.Modules[i] = Module{
+			Dir:       m.Dir,
+			Files:     m.Files,
+			TestFiles: m.TestFiles,
+			Decls:     m.Decls,
+			TestDecls: m.TestDecls,
+			DependsOn: append([]string{}, m.DependsOn...),
+			Imports:   append([]string{}, m.Imports...),
+		}
+	}
+	for i, e := range structure.Edges {
+		out.Edges[i] = Edge{From: e.From, To: e.To, Import: e.Import}
+	}
+	return out
 }
 
 // goals maps assessments, downgrading every relation to stale when the snapshot

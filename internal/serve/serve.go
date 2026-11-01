@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"observe/internal/analyze"
 	"observe/internal/model"
 	"observe/internal/repo"
 	"observe/internal/store"
@@ -33,6 +34,7 @@ type Analyzed struct {
 	Repository  string
 	Snapshot    model.Snapshot
 	Baseline    model.SpecBaseline
+	Structure   analyze.Structure
 	Changes     []repo.Change
 	Conflicts   []model.PromptConflict
 	PromptShown bool

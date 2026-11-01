@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	ts "github.com/tree-sitter/go-tree-sitter"
-	tsgo "github.com/tree-sitter/tree-sitter-go/bindings/go"
-	tsts "github.com/tree-sitter/tree-sitter-typescript/bindings/go"
 
 	"observe/internal/model"
 )
@@ -124,26 +122,10 @@ func languageFor(p string) (string, bool) {
 }
 
 func parseDeclarations(lang string, f File) ([]Declaration, error) {
-	var grammar *ts.Language
-	switch lang {
-	case "go":
-		grammar = ts.NewLanguage(tsgo.Language())
-	case "typescript":
-		if path.Ext(f.Path) == ".tsx" {
-			grammar = ts.NewLanguage(tsts.LanguageTSX())
-		} else {
-			grammar = ts.NewLanguage(tsts.LanguageTypescript())
-		}
-	default:
-		return nil, nil
-	}
-
-	parser := ts.NewParser()
-	defer parser.Close()
-	if err := parser.SetLanguage(grammar); err != nil {
+	tree, err := parse(lang, f)
+	if err != nil || tree == nil {
 		return nil, err
 	}
-	tree := parser.Parse(f.Body, nil)
 	defer tree.Close()
 
 	kinds := declarationKinds[lang]

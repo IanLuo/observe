@@ -54,6 +54,12 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	baseline := analyze.Baseline(docs)
 	declarations, parseDiags := analyze.Declarations(sources)
 
+	// The project's construction does not depend on a goal baseline, so it is read
+	// before the baseline branch: a repository with a missing or conflicting
+	// baseline can still be seen (AC7).
+	structure, structureDiags := analyze.StructureOf(sources)
+	parseDiags = append(parseDiags, structureDiags...)
+
 	fingerprint := analyze.Fingerprint(analyze.FingerprintInput{
 		RepoIdentity:  r.Identity(),
 		Commit:        commit,
@@ -66,6 +72,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	out := Analyzed{
 		Repository: r.Root(),
 		Baseline:   baseline,
+		Structure:  structure,
 		Changes:    changes,
 		Snapshot: model.Snapshot{
 			Fingerprint: fingerprint,
