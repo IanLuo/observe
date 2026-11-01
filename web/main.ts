@@ -2,7 +2,7 @@
 // The page owns selection, expansion, and the diff toggle; it owns no status.
 
 import { Envelope, State } from "./types";
-import { renderMap } from "./map";
+import { dirOf, renderMap } from "./map";
 import {
   renderBaseline,
   renderConflicts,
@@ -80,8 +80,10 @@ function render(): void {
   nodes.banner.textContent = view.error ?? "";
   nodes.banner.className = "banner" + (view.error ? " warn" : "");
 
+  if (view.selected && !selectionExists(state, view.selected)) view.selected = null;
+
   const shown: State = view.pending ? { ...state, freshness: "updating" } : state;
-  renderHeader(nodes.header, shown, handlers);
+  renderHeader(nodes.header, shown, view.showDiff, handlers);
   renderBaseline(nodes.baseline, state);
   renderRail(nodes.rail, state, view.selected, handlers);
   renderDiff(nodes.diff, state, view.showDiff, handlers);
@@ -99,15 +101,21 @@ function render(): void {
     onSelect: handlers.onSelect,
     onToggle: handlers.onToggle,
   });
-
-  // A selection that no longer exists (a new analysis, a closed area) is dropped
-  // rather than silently retargeted to something else.
-  if (view.selected && !selectionExists(state, view.selected)) view.selected = null;
 }
 
+/**
+ * selectionExists says whether a selection still names something in this state.
+ * Every key shape is read as its own kind: a file, an area directory, or a goal
+ * index. Reading an area key as a goal index drops the selection on the next
+ * render, which showed the module detail for one frame and then lost it.
+ */
 function selectionExists(state: State, key: string): boolean {
-  if (key.startsWith("f:")) return (state.diff.files ?? []).some((file) => file.path === key.slice(2));
-  return (state.goals ?? [])[Number(key.split(":")[1])] != null;
+  const value = key.slice(2);
+  if (key.startsWith("f:")) return (state.diff.files ?? []).some((file) => file.path === value);
+  if (key.startsWith("a:")) {
+    return (state.goals ?? []).some((goal) => (goal.evidence ?? []).some((ref) => dirOf(ref.path) === value));
+  }
+  return (state.goals ?? [])[Number(value)] != null;
 }
 
 async function load(): Promise<void> {

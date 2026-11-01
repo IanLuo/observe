@@ -28,7 +28,7 @@ const freshnessStyle: Record<string, StatusStyle> = {
   failed: { icon: "⚠", word: "Failed", cls: "st-conflict" },
 };
 
-export function renderHeader(root: HTMLElement, state: State, h: PanelHandlers): void {
+export function renderHeader(root: HTMLElement, state: State, showDiff: boolean, h: PanelHandlers): void {
   root.replaceChildren();
 
   const name = state.repository.split("/").filter(Boolean).pop() ?? state.repository;
@@ -51,7 +51,10 @@ export function renderHeader(root: HTMLElement, state: State, h: PanelHandlers):
   }
 
   const diff = button("Show diff", "Toggle the selected-diff highlight", h.onToggleDiff);
-  diff.setAttribute("aria-pressed", state.diff.files && state.diff.files.length ? "true" : "false");
+  // The pressed state is the toggle's own state, not whether a diff exists: a
+  // button that says "pressed" while the highlight is hidden lies to a screen
+  // reader.
+  diff.setAttribute("aria-pressed", showDiff ? "true" : "false");
   const actions = el("div", { class: "actions" }, [
     button("Refresh", "Retry the analysis now", h.onRefresh),
     diff,
