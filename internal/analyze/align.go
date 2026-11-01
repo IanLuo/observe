@@ -254,25 +254,16 @@ func nameSet(decls []Declaration) map[string]bool {
 	return names
 }
 
-// mergeBounded adds the diff evidence to what the goal already had, applies the
-// same evidence ceiling as Assess, and records the reason when it truncates: a
-// shortened list must never look complete.
+// mergeBounded adds the diff evidence to what the goal already had and applies
+// the shared evidence ceiling.
 func mergeBounded(a model.GoalAssessment, extra []model.EvidenceRef, message string) ([]model.EvidenceRef, []model.Diagnostic) {
 	diags := a.Diagnostics
 	if message != "" {
 		diags = append(diags, model.Diagnostic{Path: a.Locator.SpecPath, Op: "diff", Message: message})
 	}
 
-	evidence := dedupe(append(append([]model.EvidenceRef{}, a.Evidence...), extra...))
-	if len(evidence) > maxEvidencePerGoal {
-		diags = append(diags, model.Diagnostic{
-			Path:    a.Locator.SpecPath,
-			Op:      "diff",
-			Message: fmt.Sprintf("showing %d of %d code links for this goal", maxEvidencePerGoal, len(evidence)),
-		})
-		evidence = evidence[:maxEvidencePerGoal]
-	}
-	return evidence, diags
+	evidence, truncated := boundEvidence(dedupe(append(append([]model.EvidenceRef{}, a.Evidence...), extra...)), a.Locator.SpecPath)
+	return evidence, append(diags, truncated...)
 }
 
 // describeRefs names the strongest references in a message.

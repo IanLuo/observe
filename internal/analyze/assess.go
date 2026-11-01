@@ -73,13 +73,9 @@ func Assess(goals []model.GoalLocator, decls []Declaration) []model.GoalAssessme
 		}
 
 		if len(implementation) > maxEvidencePerGoal {
-			assessment.Diagnostics = append(assessment.Diagnostics, model.Diagnostic{
-				Path:    goal.SpecPath,
-				Op:      "link",
-				Message: fmt.Sprintf("showing %d of %d code links for this goal", maxEvidencePerGoal, len(implementation)),
-			})
-			implementation = implementation[:maxEvidencePerGoal]
+			implementation, truncated := boundEvidence(implementation, goal.SpecPath)
 			assessment.Evidence = implementation
+			assessment.Diagnostics = append(assessment.Diagnostics, truncated...)
 		}
 		if len(implementation) == 0 {
 			assessment.Relation = model.RelationUnmapped
@@ -160,6 +156,20 @@ func confidence(t term, d Declaration) float64 {
 	default:
 		return 0.5
 	}
+}
+
+// boundEvidence applies the evidence ceiling and reports the truncation, so a
+// shortened list never looks complete. Every producer of goal evidence goes
+// through here, so the ceiling and its wording have one home.
+func boundEvidence(refs []model.EvidenceRef, specPath string) ([]model.EvidenceRef, []model.Diagnostic) {
+	if len(refs) <= maxEvidencePerGoal {
+		return refs, nil
+	}
+	return refs[:maxEvidencePerGoal], []model.Diagnostic{{
+		Path:    specPath,
+		Op:      "link",
+		Message: fmt.Sprintf("showing %d of %d code links for this goal", maxEvidencePerGoal, len(refs)),
+	}}
 }
 
 // dedupe drops repeated references to the same declaration, which happens when a
