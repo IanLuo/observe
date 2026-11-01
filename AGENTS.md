@@ -12,7 +12,7 @@
 - `nix develop --command sh -c 'go build ./... && go vet ./... && go test ./... -count=1 && gofmt -l .'` — build, vet, test, format check.
 - `nix build .` — hermetic build; `./result/bin/observe <repository>`.
 - `nix develop --command go run ./cmd/observe <repository>` — report what the reader, goal baseline, and analyzer see.
-- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links), `cmd/observe`. `internal/store`, `internal/watch`, `internal/serve`, and `web/` are designed, not built.
+- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links, diff classification, prompt conflicts), `internal/store` (input fingerprint, disposable current-state cache), `cmd/observe`. `internal/watch`, `internal/serve`, and `web/` are designed, not built.
 
 ## Hot invariants
 

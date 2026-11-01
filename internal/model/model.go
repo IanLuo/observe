@@ -7,6 +7,14 @@
 // inventing its own string.
 package model
 
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"sort"
+	"strings"
+	"time"
+)
+
 // Relation is how code relates to a goal. An unmapped change is never rendered
 // as aligned, and no value may be upgraded during presentation.
 type Relation string
@@ -137,4 +145,101 @@ type InputFingerprint struct {
 	SourceHashes    map[string]string // source path -> content hash
 	AnalyzerVersion string
 	SchemaVersion   string
+}
+
+// Key is a canonical form of the fingerprint: two fingerprints have the same key
+// exactly when every input matches. Maps are sorted, so the key never depends on
+// map iteration order.
+func (f InputFingerprint) Key() string {
+	var b strings.Builder
+	write := func(name, value string) {
+		b.WriteString(name)
+		b.WriteByte('=')
+		b.WriteString(value)
+		b.WriteByte('\n')
+	}
+
+	write("repo", f.RepoIdentity)
+	write("commit", f.Commit)
+	write("diff", f.DiffHash)
+	for _, path := range sortedPaths(f.SpecHashes) {
+		write("spec:"+path, f.SpecHashes[path])
+	}
+	for _, path := range sortedPaths(f.SourceHashes) {
+		write("source:"+path, f.SourceHashes[path])
+	}
+	write("analyzer", f.AnalyzerVersion)
+	write("schema", f.SchemaVersion)
+	return b.String()
+}
+
+// Differences names the inputs that differ between two fingerprints, so a
+// discarded cache can say what changed instead of only that something did.
+func (f InputFingerprint) Differences(g InputFingerprint) []string {
+	var changed []string
+	note := func(name string, differs bool) {
+		if differs {
+			changed = append(changed, name)
+		}
+	}
+
+	note("repository identity", f.RepoIdentity != g.RepoIdentity)
+	note("commit", f.Commit != g.Commit)
+	note("selected diff", f.DiffHash != g.DiffHash)
+	note("analyzer version", f.AnalyzerVersion != g.AnalyzerVersion)
+	note("cache schema version", f.SchemaVersion != g.SchemaVersion)
+
+	changed = append(changed, hashDifferences("spec", f.SpecHashes, g.SpecHashes)...)
+	changed = append(changed, hashDifferences("source", f.SourceHashes, g.SourceHashes)...)
+	sort.Strings(changed)
+	return changed
+}
+
+// hashDifferences names the paths whose hash was added, removed, or changed.
+func hashDifferences(kind string, from, to map[string]string) []string {
+	seen := make(map[string]bool, len(from)+len(to))
+	var changed []string
+	for _, path := range sortedPaths(from) {
+		seen[path] = true
+		if to[path] != from[path] {
+			changed = append(changed, kind+":"+path)
+		}
+	}
+	for _, path := range sortedPaths(to) {
+		if !seen[path] {
+			changed = append(changed, kind+":"+path)
+		}
+	}
+	return changed
+}
+
+func sortedPaths(hashes map[string]string) []string {
+	paths := make([]string, 0, len(hashes))
+	for path := range hashes {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+// Generation is a short, stable identifier for one analysis of exactly these
+// inputs. Two runs over unchanged inputs share it; any input change gives a new
+// one.
+func (f InputFingerprint) Generation() string {
+	sum := sha256.Sum256([]byte(f.Key()))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
+// Snapshot is one immutable analysis result, and the only record the cache
+// persists (.agents/specs/system-design.md, Data model). It carries derived
+// statuses and references, never source text and never the task prompt: prompt
+// conflicts stay in memory, because the prompt is transient context and is not
+// persisted.
+type Snapshot struct {
+	Fingerprint InputFingerprint
+	Generation  string
+	CreatedAt   time.Time
+	Freshness   Freshness
+	Assessments []GoalAssessment
+	Diagnostics []Diagnostic
 }

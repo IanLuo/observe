@@ -8,29 +8,39 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"observe/internal/analyze"
 	"observe/internal/model"
 	"observe/internal/repo"
+	"observe/internal/store"
 )
 
 func main() {
+	cacheDefault, cacheNote := store.DefaultPath()
+	if cacheNote != nil {
+		cacheDefault = "" // no cache is a valid configuration; say so below
+	}
 	prompt := flag.String("prompt", "", "optional task prompt; context only, never a replacement for a locked spec")
+	cachePath := flag.String("cache", cacheDefault, "cache file path outside the repository; empty disables the cache")
 	flag.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: observe [-prompt \"text\"] <repository>")
+		fmt.Fprintln(os.Stderr, "usage: observe [-prompt \"text\"] [-cache <path>] <repository>")
 	}
 	flag.Parse()
 	if flag.NArg() != 1 {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if err := run(flag.Arg(0), *prompt); err != nil {
+	if cacheNote != nil {
+		fmt.Fprintln(os.Stderr, "observe: cache disabled:", cacheNote)
+	}
+	if err := run(flag.Arg(0), *prompt, *cachePath); err != nil {
 		fmt.Fprintln(os.Stderr, "observe:", err)
 		os.Exit(1)
 	}
 }
 
-func run(path, prompt string) error {
+func run(path, prompt, cachePath string) error {
 	r, err := repo.Open(path)
 	if err != nil {
 		return err
@@ -99,6 +109,19 @@ func run(path, prompt string) error {
 	}
 
 	goals := analyze.Requirements(specPath, specBody)
+	cached := loadCache(cachePath, r, fingerprintOf(r, commit, diffHash, specs, files))
+	defer cached.close()
+
+	// Prompt conflicts are report-only and are never persisted, so they are
+	// computed on both the cached and the fresh path.
+	conflicts := analyze.PromptConflicts(goals, prompt)
+
+	if cached.snapshot != nil {
+		reportGoals(cached.snapshot.Assessments)
+		reportPrompt(conflicts)
+		return nil
+	}
+
 	changes := make([]analyze.Change, len(changed))
 	for i, c := range changed {
 		changes[i] = analyze.Change{Path: c.Path, Status: c.Status, Diff: c.Diff, Old: c.Old, New: c.New}
@@ -114,11 +137,29 @@ func run(path, prompt string) error {
 		reported[key] = true
 		fmt.Printf("             ! %s: %s\n", d.Path, d.Message)
 	}
-	if prompt != "" {
-		fmt.Printf("prompt       %d conflict(s), unresolved; the locked spec remains the baseline\n", len(result.PromptConflicts))
+	reportGoals(result.Assessments)
+	reportPrompt(conflicts)
+
+	saved := model.Snapshot{
+		Fingerprint: cached.fingerprint,
+		Generation:  cached.fingerprint.Generation(),
+		CreatedAt:   time.Now().UTC(),
+		Freshness:   model.FreshnessCurrent,
+		Assessments: result.Assessments,
+		Diagnostics: result.Diagnostics,
 	}
-	assessments := result.Assessments
-	fmt.Printf("goals        %d in %s\n", len(assessments), specPath)
+	cached.save(saved)
+	return nil
+}
+
+// reportGoals prints one line per goal: its relation to the selected diff, the
+// evidence behind it, and any diagnostic that explains the classification.
+func reportGoals(assessments []model.GoalAssessment) {
+	spec := ""
+	if len(assessments) > 0 {
+		spec = " in " + assessments[0].Locator.SpecPath
+	}
+	fmt.Printf("goals        %d%s\n", len(assessments), spec)
 	for _, a := range assessments {
 		fmt.Printf("             %-19s links=%-3d tests=%-3d %s\n",
 			a.Relation, len(a.Evidence), len(a.VerificationEvidence), truncate(a.Locator.Label, 64))
@@ -131,10 +172,18 @@ func run(path, prompt string) error {
 			}
 		}
 	}
-	for _, c := range result.PromptConflicts {
+}
+
+// reportPrompt prints the prompt conflicts, each with the sentence that caused it.
+// The locked spec is never replaced by a prompt, so nothing here resolves.
+func reportPrompt(conflicts []model.PromptConflict) {
+	if len(conflicts) == 0 {
+		return
+	}
+	fmt.Printf("prompt       %d conflict(s), unresolved; the locked spec remains the baseline\n", len(conflicts))
+	for _, c := range conflicts {
 		fmt.Printf("conflict     %q vs %s\n             ! %s\n", truncate(c.Prompt, 60), c.Locator.SpecPath, c.Diagnostic)
 	}
-	return nil
 }
 
 // describeDiff shows the selected diff: what changed in each path, and the lines
@@ -235,4 +284,85 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
+}
+
+// cache is the optional current-analysis cache. A nil handle means the cache is
+// disabled or unusable, and analysis still runs: a cache failure must not block
+// browsing (system-design, Failure modes).
+type cache struct {
+	handle      *store.Cache
+	fingerprint model.InputFingerprint
+	snapshot    *model.Snapshot
+}
+
+func (c *cache) close() {
+	if c.handle != nil {
+		c.handle.Close()
+	}
+}
+
+// save replaces the current record. A failed write is reported and does not fail
+// the run: the analysis is still valid, it is simply not remembered.
+func (c *cache) save(s model.Snapshot) {
+	if c.handle == nil {
+		return
+	}
+	if err := c.handle.Save(s); err != nil {
+		fmt.Printf("cache        NOT SAVED: %v\n", err)
+		return
+	}
+	fmt.Printf("cache        %s, record replaced\n", c.handle.Path())
+}
+
+// loadCache opens the cache and reports its state. It sets snapshot only when the
+// stored record matches the current fingerprint exactly; otherwise the record has
+// been discarded and the caller recomputes.
+func loadCache(path string, r *repo.Repo, fingerprint model.InputFingerprint) *cache {
+	c := &cache{fingerprint: fingerprint}
+	if path == "" {
+		fmt.Printf("cache        disabled\n")
+		return c
+	}
+
+	handle, err := store.Open(path, r.Root())
+	if err != nil {
+		fmt.Printf("cache        unavailable, analysis continues: %v\n", err)
+		return c
+	}
+	c.handle = handle
+
+	loaded, err := handle.Load(fingerprint)
+	if err != nil {
+		fmt.Printf("cache        %s, unreadable: %v\n", handle.Path(), err)
+		return c
+	}
+	for _, d := range loaded.Diagnostics {
+		fmt.Printf("cache        %s\n             ! %s\n", handle.Path(), d.Message)
+	}
+	if loaded.Fresh {
+		c.snapshot = &loaded.Snapshot
+		fmt.Printf("cache        %s, current (written %s)\n", handle.Path(), loaded.Snapshot.CreatedAt.Format(time.RFC3339))
+		return c
+	}
+	if len(loaded.Diagnostics) == 0 {
+		fmt.Printf("cache        %s, no record yet\n", handle.Path())
+	}
+	return c
+}
+
+// fingerprintOf records what the analysis depends on, as hashes. The task prompt
+// is not part of it: a prompt is transient context, never a cache input (AC12).
+func fingerprintOf(r *repo.Repo, commit, diffHash string, specs []repo.SpecFile, sources []analyze.File) model.InputFingerprint {
+	specFiles := make([]analyze.File, len(specs))
+	for i, s := range specs {
+		specFiles[i] = analyze.File{Path: s.Path, Body: s.Body}
+	}
+	return analyze.Fingerprint(analyze.FingerprintInput{
+		RepoIdentity:  r.Identity(),
+		Commit:        commit,
+		DiffHash:      diffHash,
+		Specs:         specFiles,
+		Sources:       sources,
+		SchemaVersion: store.SchemaVersion,
+	})
 }
