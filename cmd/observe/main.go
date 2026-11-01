@@ -16,8 +16,16 @@ import (
 	"syscall"
 	"time"
 
+	"observe/internal/repo"
 	"observe/internal/serve"
 	"observe/internal/store"
+)
+
+// portBase and portTries shape the automatic port choice: start at 8080 and walk
+// up, so the first project gets a memorable address and the next one a neighbour.
+const (
+	portBase  = 8080
+	portTries = 50
 )
 
 func main() {
@@ -28,15 +36,31 @@ func main() {
 
 	prompt := flag.String("prompt", "", "optional task prompt; context only, never a replacement for a locked spec")
 	cachePath := flag.String("cache", cacheDefault, "cache file outside the repository; empty disables the cache")
-	addr := flag.String("addr", "127.0.0.1:0", "loopback listen address; a non-loopback address is refused")
+	addr := flag.String("addr", "", "exact loopback address to bind; empty picks the first free port from 8080")
 	report := flag.Bool("report", false, "print the state as JSON and exit instead of serving")
 	noOpen := flag.Bool("no-open", false, "do not open a browser")
 
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "usage: observe [-prompt \"text\"] [-cache <path>] [-addr <host:port>] [-report] [-no-open] <repository>")
+		fmt.Fprintln(os.Stderr, "       observe stop [<path>]   stop the instance serving that project (default: this directory)")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	// `observe stop` is a lifecycle command, not a repository named "stop": a path
+	// is resolved instead of analysed, so it works from any directory in a project.
+	if flag.Arg(0) == "stop" {
+		target := flag.Arg(1)
+		if target == "" {
+			target = "."
+		}
+		if err := stopProject(target); err != nil {
+			fmt.Fprintln(os.Stderr, "observe:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if flag.NArg() != 1 {
 		flag.Usage()
 		os.Exit(2)
@@ -73,11 +97,41 @@ func run(opts serve.Options, addr string, report, noOpen bool) error {
 		return refreshErr
 	}
 
-	url, err := s.Listen(addr)
+	// One instance per project: a second start reports the running one instead of
+	// failing on a busy port or shadowing it with a second analysis.
+	root, err := repo.Open(opts.RepoPath)
+	if err != nil {
+		return err
+	}
+	if record, found, err := loadRun(root.Root()); err != nil {
+		return err
+	} else if found && alive(record.PID) {
+		fmt.Printf("already serving %s at %s (pid %d); stop it with `observe stop`\n", root.Root(), record.URL, record.PID)
+		return nil
+	}
+
+	var url string
+	if addr != "" {
+		url, err = s.Listen(addr)
+	} else {
+		url, err = freeAddr(s, portBase, portTries)
+	}
 	if err != nil {
 		return err
 	}
 	fmt.Printf("observe %s\n", url)
+
+	record := runRecord{
+		Path:      root.Root(),
+		URL:       url,
+		PID:       os.Getpid(),
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	record.Port = urlPort(url)
+	if err := saveRun(record); err != nil {
+		fmt.Fprintln(os.Stderr, "observe:", err)
+	}
+	defer removeRun(root.Root())
 
 	// A failed first analysis is reported by the view, not by exiting: the page
 	// stays available and offers retry (AC9).
