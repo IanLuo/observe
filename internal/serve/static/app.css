@@ -107,11 +107,24 @@ button:disabled { opacity: 0.55; cursor: default; }
 
 main {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr) 380px;
+  /* the detail panel's width is set by web/resize.ts, which writes --detail-width */
+  grid-template-columns: 320px minmax(0, 1fr) 8px var(--detail-width, 380px);
   gap: 16px;
   padding: 16px 24px 8px;
   align-items: start;
 }
+
+.gutter {
+  align-self: stretch;
+  min-height: 200px;
+  border-radius: 4px;
+  /* a faint centre line, so the handle is findable without hover */
+  background: linear-gradient(to right, transparent 3px, var(--border) 3px, var(--border) 5px, transparent 5px);
+  cursor: col-resize;
+  touch-action: none;
+}
+.gutter:hover, .gutter:focus-visible { background: var(--border); outline: none; }
+body.resizing { cursor: col-resize; user-select: none; }
 
 .left, .detail {
   background: var(--panel);
@@ -144,6 +157,7 @@ footer {
 
 @media (max-width: 1100px) {
   main { grid-template-columns: 280px minmax(0, 1fr); }
+  .gutter { display: none; }
   .detail {
     position: fixed;
     top: 64px;

@@ -5,6 +5,7 @@ import { Envelope, State } from "./types";
 import { dirOf, renderMap } from "./map";
 import { renderFileDetail, renderMapBar, renderModuleDetail, renderProject } from "./project";
 import { renderNav } from "./nav";
+import { installResize } from "./resize";
 import {
   renderBaseline,
   renderConflicts,
@@ -45,6 +46,7 @@ const nodes = {
   nav: byId("nav"),
   map: byId("map"),
   mapbar: byId("mapbar"),
+  gutter: byId("gutter"),
   detail: byId("detail"),
   conflicts: byId("conflicts"),
   footer: byId("footer"),
@@ -217,4 +219,5 @@ document.addEventListener("keydown", (event) => {
   render();
 });
 
+installResize(nodes.gutter);
 void load();
