@@ -487,3 +487,36 @@ func TestStateCarriesTheProjectStructure(t *testing.T) {
 		t.Fatalf("edges = %+v, want one %+v", st.Structure.Edges, want)
 	}
 }
+
+// A tracked path that is a directory on disk — a nested worktree, a replaced file —
+// must not fail the whole analysis. It is skipped, and the skip is visible.
+func TestPipelineSkipsATrackedPathThatIsADirectory(t *testing.T) {
+	dir := fixtureRepo(t, map[string]string{
+		".agents/specs/spec.md": specDoc,
+		"internal/repo/repo.go": "package repo\n\nfunc Open() {}\n",
+	})
+	// The index still records a file here; the working tree has a directory.
+	if err := os.RemoveAll(filepath.Join(dir, "internal/repo/repo.go")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, "internal/repo/repo.go/nested.txt", "not source\n")
+
+	s := newServer(t, dir, "")
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatalf("one odd path failed the analysis: %v", err)
+	}
+
+	st := state(t, s)
+	if st.Freshness != "current" {
+		t.Fatalf("freshness = %q, want current", st.Freshness)
+	}
+	found := false
+	for _, diagnostic := range st.Diagnostics {
+		if strings.Contains(diagnostic, "internal/repo/repo.go") && strings.Contains(diagnostic, "directory") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the skipped path was not reported: %v", st.Diagnostics)
+	}
+}

@@ -295,3 +295,31 @@ func snapshotTree(t *testing.T, root string) map[string]string {
 	}
 	return files
 }
+
+// A nested worktree or submodule is an index entry whose on-disk form is a
+// directory. Reading it as a file fails with "is a directory", so it is not
+// tracked source.
+func TestTrackedFilesOmitsGitlinks(t *testing.T) {
+	dir := newRepo(t, map[string]string{"main.go": "package main\n"})
+
+	// A gitlink without a .gitmodules file: exactly what a nested worktree leaves
+	// in the index.
+	gitIn(t, dir, "update-index", "--add", "--cacheinfo",
+		"160000,"+strings.Repeat("a", 40)+",.claude/worktrees/agent-1")
+	if err := os.MkdirAll(filepath.Join(dir, ".claude", "worktrees", "agent-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	paths, err := openRepo(t, dir).TrackedFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range paths {
+		if strings.HasPrefix(path, ".claude/") {
+			t.Fatalf("a gitlink was listed as a tracked file: %s", paths)
+		}
+	}
+	if len(paths) == 0 {
+		t.Fatal("the regular file disappeared with the gitlink")
+	}
+}

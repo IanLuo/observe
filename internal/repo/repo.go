@@ -105,15 +105,34 @@ func (r *Repo) Commit() (string, error) {
 }
 
 // TrackedFiles lists repository-relative paths from the index, sorted.
+//
+// Gitlinks — nested worktrees and submodules, index mode 160000 — are omitted:
+// git records them as index entries, but on disk they are directories that belong
+// to another repository, so they are neither files to read nor part of this
+// project's source.
 func (r *Repo) TrackedFiles() ([]string, error) {
-	out, err := r.git("ls-files", "-z")
+	out, err := r.git("ls-files", "-s", "-z")
 	if err != nil {
 		return nil, err
 	}
-	paths := splitNUL(out)
+	var paths []string
+	for _, entry := range splitNUL(out) {
+		// "<mode> <sha> <stage>	<path>"
+		meta, path, found := strings.Cut(entry, "	")
+		if !found || path == "" {
+			continue
+		}
+		if strings.HasPrefix(meta, gitlinkMode) {
+			continue
+		}
+		paths = append(paths, path)
+	}
 	sort.Strings(paths)
 	return paths, nil
 }
+
+// gitlinkMode is the index mode of an entry that is another repository.
+const gitlinkMode = "160000"
 
 // ReadFile reads one repository-relative file. Absolute paths and paths that
 // escape the root are refused, so repository content cannot name a file

@@ -2,7 +2,9 @@ package serve
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"syscall"
 	"time"
 
 	"observe/internal/analyze"
@@ -42,7 +44,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	if err != nil {
 		return Analyzed{}, err
 	}
-	sources, err := readSources(r, tracked)
+	sources, sourceDiags, err := readSources(r, tracked)
 	if err != nil {
 		return Analyzed{}, err
 	}
@@ -53,6 +55,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	}
 	baseline := analyze.Baseline(docs)
 	declarations, parseDiags := analyze.Declarations(sources)
+	parseDiags = append(parseDiags, sourceDiags...)
 
 	// The project's construction does not depend on a goal baseline, so it is read
 	// before the baseline branch: a repository with a missing or conflicting
@@ -155,19 +158,33 @@ func (o Options) openCache(root string) (Cache, *store.Cache, []model.Diagnostic
 
 // readSources reads the tracked files in the V1 language set. A tracked file that
 // cannot be read is an error, never a missing file.
-func readSources(r *repo.Repo, tracked []string) ([]analyze.File, error) {
-	var files []analyze.File
+func readSources(r *repo.Repo, tracked []string) ([]analyze.File, []model.Diagnostic, error) {
+	var (
+		files []analyze.File
+		diags []model.Diagnostic
+	)
 	for _, p := range tracked {
 		if !analyze.IsSourcePath(p) {
 			continue
 		}
 		body, err := r.ReadFile(p)
+		if errors.Is(err, syscall.EISDIR) {
+			// The index says file, the working tree says directory — a nested
+			// repository or a replaced path. It is not readable source, and one odd
+			// path must not fail the whole analysis.
+			diags = append(diags, model.Diagnostic{
+				Op:      "source",
+				Path:    p,
+				Message: "tracked path is a directory, not a file; skipped",
+			})
+			continue
+		}
 		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", p, err)
+			return nil, nil, fmt.Errorf("read %s: %w", p, err)
 		}
 		files = append(files, analyze.File{Path: p, Body: body})
 	}
-	return files, nil
+	return files, diags, nil
 }
 
 // specFiles is the locked-spec set in the form the fingerprint hashes.
