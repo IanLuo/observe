@@ -27,14 +27,11 @@ export interface ProjectOptions {
 /** fileKey is the selection key for one source file inside a module. */
 export const fileKey = (path: string): string => "s:" + path;
 
-interface Layer {
-  depth: number;
-  modules: Module[];
-}
-
+// Drawing units. The viewBox uses these, so layout is independent of the panel size.
 const NODE_H = 54;
 const GAP_Y = 74;
 const GAP_X = 18;
+const GAP = 26;
 const PAD = 16;
 
 /** depthOf assigns each module the length of its longest dependency chain. */
@@ -60,30 +57,55 @@ export function depthOf(modules: Module[]): Map<string, number> {
   return depths;
 }
 
-/** layersOf groups modules by dependency depth, deepest last. */
-export function layersOf(modules: Module[]): Layer[] {
-  const depths = depthOf(modules);
-  const layers: Layer[] = [];
-  for (const module of modules) {
-    const depth = depths.get(module.dir) ?? 0;
-    let layer = layers.find((l) => l.depth === depth);
-    if (!layer) {
-      layer = { depth, modules: [] };
-      layers.push(layer);
-    }
-    layer.modules.push(module);
-  }
-  // Entered modules sit at the top and their dependencies below them, so the page
-  // reads top-down as "this is built from this".
-  layers.sort((a, b) => b.depth - a.depth);
-  for (const layer of layers) layer.modules.sort((a, b) => a.dir.localeCompare(b.dir));
-  return layers;
+/** A box in the drawing: position and size in viewBox units. */
+interface Box {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  row: number;
 }
 
-/** nodeWidth sizes a module box by its two lines of text, so nothing is clipped. */
-function nodeWidth(module: Module): number {
-  const longest = Math.max(module.dir.length * 7.8, metaText(module).length * 5.9);
-  return Math.max(160, Math.min(340, 24 + longest));
+/**
+ * gridLayout places n items in rows of at most cols, centring the last row.
+ *
+ * The drawing is scaled to the panel width, so a long single row shrinks the text
+ * to nothing. Wrapping keeps every box at a readable size.
+ */
+function gridLayout(n: number, cols: number, w: number, h: number, gapY: number, gapX: number) {
+  const rows = Math.max(1, Math.ceil(n / cols));
+  const width = PAD * 2 + cols * w + (cols - 1) * gapX;
+  const height = PAD * 2 + rows * h + (rows - 1) * gapY;
+  return {
+    width,
+    height,
+    box(index: number): Box | null {
+      if (index >= n) return null;
+      const row = Math.floor(index / cols);
+      const col = index % cols;
+      const inRow = Math.min(cols, n - row * cols);
+      const offset = ((cols - inRow) * (w + gapX)) / 2;
+      return { x: PAD + offset + col * (w + gapX), y: PAD + row * (h + gapY), w, h, row };
+    },
+  };
+}
+
+/** edgePath routes one arrow: sideways within a row, otherwise downward. */
+function edgePath(from: Box, to: Box, w: number, h: number): string {
+  if (from.row === to.row) {
+    const right = from.x + w;
+    const leftTo = to.x;
+    const y = from.y + h / 2;
+    // Same row: leave the right edge and enter the left edge, so the line does not
+    // loop back over its own box.
+    return `M ${right} ${y} C ${right + GAP_X / 2} ${y}, ${leftTo - GAP_X / 2} ${to.y + h / 2}, ${leftTo} ${to.y + h / 2}`;
+  }
+  const x1 = from.x + w / 2;
+  const y1 = from.y + h;
+  const x2 = to.x + w / 2;
+  const y2 = to.y;
+  const mid = (y1 + y2) / 2;
+  return `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`;
 }
 
 /**
@@ -114,28 +136,25 @@ export function renderProject(container: HTMLElement, state: State, opts: Projec
     return;
   }
 
-  const layers = layersOf(modules);
-  const widest = Math.max(...layers.map((layer) => layer.modules.reduce((sum, m) => sum + nodeWidth(m) + GAP_X, -GAP_X)));
-  const width = widest + PAD * 2;
-
-  // Position every module before drawing edges: an edge needs both endpoints.
-  const boxes = new Map<string, { x: number; y: number; w: number }>();
-  layers.forEach((layer, row) => {
-    const rowWidth = layer.modules.reduce((sum, m) => sum + nodeWidth(m) + GAP_X, -GAP_X);
-    let x = PAD + Math.max(0, (widest - rowWidth) / 2);
-    const y = PAD + row * (NODE_H + GAP_Y);
-    // Entry points read best at the top, so deeper dependencies sit lower.
-    for (const module of layer.modules) {
-      const w = nodeWidth(module);
-      boxes.set(module.dir, { x, y, w });
-      x += w + GAP_X;
-    }
+  // Modules are ordered by dependency depth — the ones others depend on last — and
+  // laid out in a wrapped grid. A single row of eleven boxes is unreadable once the
+  // drawing is scaled to the panel, so rows wrap at three.
+  const depths = depthOf(modules);
+  const ordered = [...modules].sort((a, b) => {
+    const byDepth = (depths.get(b.dir) ?? 0) - (depths.get(a.dir) ?? 0);
+    return byDepth !== 0 ? byDepth : a.dir.localeCompare(b.dir);
   });
-  const maxDepth = Math.max(...layers.map((l) => l.depth));
-  const svgHeight = PAD * 2 + (maxDepth + 1) * (NODE_H + GAP_Y) - GAP_Y;
+  const WIDTH = 216;
+  const grid = gridLayout(ordered.length, Math.min(3, ordered.length), WIDTH, NODE_H, GAP_Y, GAP_X);
+
+  const boxes = new Map<string, Box>();
+  ordered.forEach((module, index) => {
+    const box = grid.box(index);
+    if (box) boxes.set(module.dir, { ...box, w: WIDTH });
+  });
 
   const svg = svgEl("svg", "project-map");
-  svg.setAttribute("viewBox", `0 0 ${Math.ceil(width)} ${Math.ceil(svgHeight)}`);
+  svg.setAttribute("viewBox", `0 0 ${grid.width} ${grid.height}`);
   svg.setAttribute("role", "group");
   svg.setAttribute("aria-label", "Project construction: modules and their imports");
 
@@ -144,17 +163,11 @@ export function renderProject(container: HTMLElement, state: State, opts: Projec
   svg.append(edgeLayer, nodeLayer);
 
   for (const edge of edges) {
-    const to = boxes.get(edge.from);
-    const from = boxes.get(edge.to);
-    if (!to || !from) continue;
-    // Importers sit above the modules they import, so an arrow points downward.
-    const x1 = to.x + to.w / 2;
-    const y1 = to.y + NODE_H;
-    const x2 = from.x + from.w / 2;
-    const y2 = from.y;
-    const midY = (y1 + y2) / 2;
+    const from = boxes.get(edge.from);
+    const to = boxes.get(edge.to);
+    if (!from || !to) continue;
     const path = svgEl("path", "edge");
-    path.setAttribute("d", `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`);
+    path.setAttribute("d", edgePath(from, to, WIDTH, NODE_H));
     const title = svgEl("title");
     title.textContent = `${edge.from} imports ${edge.import}`;
     path.append(title);
@@ -222,27 +235,18 @@ function renderFileMap(container: HTMLElement, state: State, module: Module, opt
     return byDepth !== 0 ? byDepth : a.localeCompare(b);
   });
 
-  const COLS = Math.min(4, ordered.length);
   const W = 210;
   const H = 46;
-  const GAP = 26;
-  const PAD = 16;
-  const rows = Math.ceil(ordered.length / COLS);
-  const width = PAD * 2 + COLS * W + (COLS - 1) * GAP;
-  const height = PAD * 2 + rows * H + (rows - 1) * GAP;
-
-  const boxes = new Map<string, { x: number; y: number; row: number }>();
+  const COLS = Math.min(4, ordered.length);
+  const grid = gridLayout(ordered.length, COLS, W, H, GAP, GAP);
+  const boxes = new Map<string, Box>();
   ordered.forEach((path, index) => {
-    const row = Math.floor(index / COLS);
-    const col = index % COLS;
-    // The last row is centred so the picture does not lean left.
-    const inRow = Math.min(COLS, ordered.length - row * COLS);
-    const offset = ((COLS - inRow) * (W + GAP)) / 2;
-    boxes.set(path, { x: PAD + offset + col * (W + GAP), y: PAD + row * (H + GAP), row });
+    const box = grid.box(index);
+    if (box) boxes.set(path, box);
   });
 
   const svg = svgEl("svg", "project-map file-map");
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("viewBox", `0 0 ${grid.width} ${grid.height}`);
   svg.setAttribute("role", "group");
   svg.setAttribute("aria-label", `${module.dir}: files and their imports`);
   const edgeLayer = svgEl("g", "edges");
@@ -254,20 +258,7 @@ function renderFileMap(container: HTMLElement, state: State, module: Module, opt
     const to = boxes.get(edge.to);
     if (!from || !to) continue;
     const path = svgEl("path", "edge");
-    if (from.row === to.row) {
-      // Same row: leave the right side and enter the left side, so the line does not
-      // loop back over its own node.
-      const right = from.x + W;
-      const leftTo = to.x;
-      path.setAttribute("d", `M ${right} ${from.y + H / 2} C ${right + GAP / 2} ${from.y + H / 2}, ${leftTo - GAP / 2} ${to.y + H / 2}, ${leftTo} ${to.y + H / 2}`);
-    } else {
-      const x1 = from.x + W / 2;
-      const y1 = from.y + H;
-      const x2 = to.x + W / 2;
-      const y2 = to.y;
-      const mid = (y1 + y2) / 2;
-      path.setAttribute("d", `M ${x1} ${y1} C ${x1} ${mid}, ${x2} ${mid}, ${x2} ${y2}`);
-    }
+    path.setAttribute("d", edgePath(from, to, W, H));
     if (edge.kind === "reference") path.setAttribute("class", "edge ref");
     const title = svgEl("title");
     title.textContent =

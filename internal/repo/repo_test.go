@@ -127,11 +127,14 @@ func TestChangesAttributesTheDiffToEachPath(t *testing.T) {
 		t.Errorf("wrong sides for a.txt: old=%q new=%q", a.Old, a.New)
 	}
 
-	// An untracked path has no HEAD version and no working-tree diff; its body is
-	// the whole change.
+	// An untracked path has no HEAD version, so its whole content is the addition:
+	// the diff is the file, not an empty panel.
 	u := changes[1]
-	if u.Status != "??" || u.Old != nil || u.Diff != "" {
+	if u.Status != "??" || u.Old != nil {
 		t.Errorf("untracked change = %+v", u)
+	}
+	if !strings.Contains(u.Diff, "+new") {
+		t.Errorf("untracked diff does not show the added line: %q", u.Diff)
 	}
 	if string(u.New) != "new\n" {
 		t.Errorf("untracked body = %q", u.New)
@@ -345,5 +348,34 @@ func TestChangesSkipsADirectoryEntry(t *testing.T) {
 		if strings.HasPrefix(change.Path, ".claude/") {
 			t.Fatalf("a directory was returned as a file change: %+v", change)
 		}
+	}
+}
+
+// Work in progress is the normal case: a new source file exists on disk before it
+// is committed. Files therefore includes untracked, non-ignored paths — and still
+// excludes what .gitignore declares as not this project.
+func TestFilesIncludesUntrackedAndRespectsIgnore(t *testing.T) {
+	dir := newRepo(t, map[string]string{"main.go": "package main\n", ".gitignore": "dist/\n"})
+	writeFile(t, dir, "src/new.go", "package src\n")
+	writeFile(t, dir, "dist/bundle.js", "built\n")
+
+	paths, err := openRepo(t, dir).Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawNew, sawBuilt bool
+	for _, path := range paths {
+		switch path {
+		case "src/new.go":
+			sawNew = true
+		case "dist/bundle.js":
+			sawBuilt = true
+		}
+	}
+	if !sawNew {
+		t.Errorf("an untracked source file is not part of the project: %v", paths)
+	}
+	if sawBuilt {
+		t.Errorf("an ignored build output was read: %v", paths)
 	}
 }

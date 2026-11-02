@@ -222,3 +222,26 @@ func TestStructureOfLinksFilesBySymbolReference(t *testing.T) {
 		}
 	}
 }
+
+// A TypeScript workspace imports its siblings by package name, so a monorepo's real
+// edges only appear when package.json names are known.
+func TestStructureOfResolvesWorkspacePackages(t *testing.T) {
+	files := []File{
+		{Path: "packages/domain/package.json", Body: []byte(`{"name": "@app/domain"}`)},
+		{Path: "packages/domain/src/index.ts", Body: []byte("export type Id = string;\n")},
+		{Path: "packages/db/package.json", Body: []byte(`{"name": "@app/db"}`)},
+		{Path: "packages/db/src/store.ts", Body: []byte("import { Id } from \"@app/domain\";\n\nexport function get(id: Id): void {}\n")},
+	}
+	structure, diags := StructureOf(files)
+	if len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %+v", diags)
+	}
+
+	db := module(t, structure, "packages/db/src")
+	if len(db.DependsOn) != 1 || db.DependsOn[0] != "packages/domain/src" {
+		t.Fatalf("packages/db/src depends on %v, want packages/domain/src", db.DependsOn)
+	}
+	if len(db.Imports) != 0 {
+		t.Errorf("a workspace package was left external: %v", db.Imports)
+	}
+}

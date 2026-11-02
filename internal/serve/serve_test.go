@@ -560,3 +560,27 @@ func TestStateAnswersUpdatingWhileAnAnalysisRuns(t *testing.T) {
 		t.Fatalf("freshness after the analysis = %q, want current", got)
 	}
 }
+
+// A workspace imports its siblings by package name, so the pipeline must hand the
+// analyzer the manifests: without them every cross-package edge looks external.
+func TestPipelineResolvesWorkspaceImports(t *testing.T) {
+	dir := fixtureRepo(t, map[string]string{
+		"packages/domain/package.json": `{"name": "@app/domain"}`,
+		"packages/domain/src/index.ts": "export type Id = string;\n",
+		"packages/db/package.json":     `{"name": "@app/db"}`,
+		"packages/db/src/store.ts":     "import { Id } from \"@app/domain\";\n\nexport function get(id: Id): void {}\n",
+	})
+	s := newServer(t, dir, "")
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	st := state(t, s)
+	want := Edge{From: "packages/db/src", To: "packages/domain/src", Kind: "import", Import: "@app/domain"}
+	for _, edge := range st.Structure.Edges {
+		if edge == want {
+			return
+		}
+	}
+	t.Fatalf("no workspace edge from db to domain: %+v", st.Structure.Edges)
+}

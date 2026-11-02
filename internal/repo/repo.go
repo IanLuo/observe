@@ -105,6 +105,39 @@ func (r *Repo) Commit() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// Files lists the repository's own files: every path in the index that is a file,
+// plus the working tree's untracked files that git does not ignore.
+//
+// Work in progress is the normal case — a new source file exists on disk before it
+// is committed — so reading only the index showed a TypeScript project as having no
+// source at all. Ignored paths stay out: node_modules, build output, and the rest
+// of what .gitignore already declares as not this project.
+func (r *Repo) Files() ([]string, error) {
+	tracked, err := r.TrackedFiles()
+	if err != nil {
+		return nil, err
+	}
+	out, err := r.git("ls-files", "--others", "--exclude-standard", "-z")
+	if err != nil {
+		return nil, err
+	}
+	untracked := splitNUL(out)
+
+	seen := make(map[string]bool, len(tracked)+len(untracked))
+	paths := make([]string, 0, len(tracked)+len(untracked))
+	for _, group := range [][]string{tracked, untracked} {
+		for _, path := range group {
+			if path == "" || seen[path] {
+				continue
+			}
+			seen[path] = true
+			paths = append(paths, path)
+		}
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
 // TrackedFiles lists repository-relative paths from the index, sorted.
 //
 // Gitlinks — nested worktrees and submodules, index mode 160000 — are omitted:
@@ -228,6 +261,17 @@ func (r *Repo) Changes() ([]Change, string, []string, error) {
 	for _, e := range statusEntries(out) {
 		c := Change{Path: e.path, Status: e.code}
 		untracked := e.code == "??"
+
+		if untracked {
+			// An untracked file has no HEAD version to diff against, so its whole
+			// content is the addition. git diff --no-index reports it the same way as
+			// any other addition; exit status 1 means "differences", which is expected.
+			diff, err := r.gitAllowDiff("diff", "--no-index", "--no-ext-diff", "--no-textconv", "--no-color", "--", "/dev/null", e.path)
+			if err != nil {
+				return nil, "", nil, err
+			}
+			c.Diff = diff
+		}
 
 		if commit != "" && !untracked {
 			diff, err := r.git("diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color", "--", e.path)

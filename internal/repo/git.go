@@ -2,6 +2,7 @@ package repo
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -34,6 +35,20 @@ func (r *Repo) command(args ...string) *exec.Cmd {
 }
 
 // git runs one read-only git query and treats any non-zero exit as a failure.
+// gitAllowDiff runs a git command whose exit status 1 means "there are
+// differences", not failure. `git diff --no-index` uses it.
+func (r *Repo) gitAllowDiff(args ...string) (string, error) {
+	cmd := r.command(args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	var exit *exec.ExitError
+	if err != nil && (!errors.As(err, &exit) || exit.ExitCode() != 1) {
+		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+	}
+	return string(out), nil
+}
+
 func (r *Repo) git(args ...string) ([]byte, error) {
 	cmd := r.command(args...)
 	var stderr bytes.Buffer

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"strings"
 	"syscall"
 	"time"
@@ -33,7 +34,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	if err != nil {
 		return Analyzed{}, err
 	}
-	tracked, err := r.TrackedFiles()
+	tracked, err := r.Files()
 	if err != nil {
 		return Analyzed{}, err
 	}
@@ -64,7 +65,9 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	// The project's construction does not depend on a goal baseline, so it is read
 	// before the baseline branch: a repository with a missing or conflicting
 	// baseline can still be seen (AC7).
-	structure, structureDiags := analyze.StructureOf(sources)
+	manifests, manifestDiags := readManifests(r, tracked)
+	structure, structureDiags := analyze.StructureOf(append(append([]analyze.File{}, sources...), manifests...))
+	structureDiags = append(structureDiags, manifestDiags...)
 	parseDiags = append(parseDiags, structureDiags...)
 
 	fingerprint := analyze.Fingerprint(analyze.FingerprintInput{
@@ -182,6 +185,28 @@ func summaryNames(paths []string) string {
 		message += fmt.Sprintf(", and %d more", len(paths)-len(shown))
 	}
 	return message + "; skipped"
+}
+
+// readManifests reads the package manifests of the project's own files. A
+// workspace imports its siblings by package name, so resolution needs these even
+// though a manifest is not source.
+func readManifests(r *repo.Repo, tracked []string) ([]analyze.File, []model.Diagnostic) {
+	var (
+		files []analyze.File
+		diags []model.Diagnostic
+	)
+	for _, p := range tracked {
+		if path.Base(p) != "package.json" || analyze.OutOfScope(p) {
+			continue
+		}
+		body, err := r.ReadFile(p)
+		if err != nil {
+			diags = append(diags, model.Diagnostic{Op: "manifest", Path: p, Message: "unreadable: " + err.Error()})
+			continue
+		}
+		files = append(files, analyze.File{Path: p, Body: body})
+	}
+	return files, diags
 }
 
 // readSources reads the tracked files in the V1 language set. A tracked file that

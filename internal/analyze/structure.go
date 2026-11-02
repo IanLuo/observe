@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"encoding/json"
 	"path"
 	"sort"
 	"strings"
@@ -77,6 +78,7 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 		moduleDirs[moduleOf(f.Path)] = true
 		fileSet[f.Path] = true
 	}
+	packageNames := workspaceNames(files, moduleDirs)
 
 	byDir := map[string]*Module{}
 	var out Structure
@@ -109,7 +111,7 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 			continue
 		}
 		for _, raw := range imports {
-			if target, targetFile, ok := resolveImport(raw, f.Path, moduleDirs, fileSet); ok {
+			if target, targetFile, ok := resolveImport(raw, f.Path, moduleDirs, fileSet, packageNames); ok {
 				if targetFile != "" && targetFile != f.Path {
 					out.FileEdges = append(out.FileEdges, FileEdge{From: f.Path, To: targetFile, Kind: "import", Import: raw})
 				}
@@ -177,6 +179,9 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 		}
 		return out.Edges[i].Import < out.Edges[j].Import
 	})
+	// One drawing per pair of modules: a package imported through two paths
+	// (@app/domain and @app/domain/errors) is one dependency, not two lines.
+	out.Edges = uniqueEdges(out.Edges)
 	return out, diags
 }
 
@@ -262,6 +267,44 @@ func identifiersOf(lang string, f File) ([]string, error) {
 	return names, nil
 }
 
+// workspaceNames maps a package.json "name" to the directory that declares it.
+//
+// A workspace imports its siblings by package name, so this is the only way a
+// TypeScript monorepo shows its real dependency edges. Only names whose directory
+// is a module here are kept: a name that resolves elsewhere says nothing about this
+// repository's construction.
+func workspaceNames(files []File, moduleDirs map[string]bool) map[string]string {
+	names := map[string]string{}
+	for _, f := range files {
+		if path.Base(f.Path) != "package.json" {
+			continue
+		}
+		dir := moduleOf(f.Path)
+		// A package's source can sit in a subdirectory (packages/domain/src), so the
+		// name belongs to the shallowest module at or under the manifest's directory.
+		target := ""
+		for candidate := range moduleDirs {
+			if candidate != dir && !strings.HasPrefix(candidate, dir+"/") {
+				continue
+			}
+			if target == "" || len(candidate) < len(target) || (len(candidate) == len(target) && candidate < target) {
+				target = candidate
+			}
+		}
+		if target == "" {
+			continue
+		}
+		var manifest struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(f.Body, &manifest); err != nil || manifest.Name == "" {
+			continue
+		}
+		names[manifest.Name] = target
+	}
+	return names
+}
+
 // moduleOf is the directory a file belongs to.
 func moduleOf(p string) string {
 	dir := path.Dir(p)
@@ -276,7 +319,7 @@ func moduleOf(p string) string {
 // Go imports carry a module path (observe/internal/serve), so a module directory
 // that is the import's tail is the target. Relative imports are resolved against
 // the importing file. Anything else is external; guessing would be invention.
-func resolveImport(raw, filePath string, moduleDirs, fileSet map[string]bool) (module, file string, ok bool) {
+func resolveImport(raw, filePath string, moduleDirs, fileSet map[string]bool, packageNames map[string]string) (module, file string, ok bool) {
 	if strings.HasPrefix(raw, "./") || strings.HasPrefix(raw, "../") {
 		target := path.Clean(path.Join(path.Dir(filePath), raw))
 		if target == ".." || strings.HasPrefix(target, "../") {
@@ -292,6 +335,18 @@ func resolveImport(raw, filePath string, moduleDirs, fileSet map[string]bool) (m
 			return target, "", true
 		}
 		return "", "", false
+	}
+
+	// A workspace package is imported by its package.json name, not its directory:
+	// "@app/domain" is packages/domain. Without this every cross-package edge in a
+	// monorepo looks external.
+	if dir, named := packageNames[raw]; named {
+		return dir, "", true
+	}
+	for name, dir := range packageNames {
+		if strings.HasPrefix(raw, name+"/") {
+			return dir, "", true
+		}
 	}
 
 	best := ""
@@ -349,6 +404,23 @@ func unquote(s string) string {
 		}
 	}
 	return s
+}
+
+// uniqueEdges keeps the first edge of every (from, to) pair; the first is the
+// lexicographically smallest import, so the choice is deterministic.
+func uniqueEdges(edges []ModuleEdge) []ModuleEdge {
+	if len(edges) == 0 {
+		return edges
+	}
+	out := edges[:1]
+	for _, edge := range edges[1:] {
+		last := out[len(out)-1]
+		if edge.From == last.From && edge.To == last.To {
+			continue
+		}
+		out = append(out, edge)
+	}
+	return out
 }
 
 func sortedUnique(values []string) []string {
