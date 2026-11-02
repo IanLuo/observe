@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,7 +37,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	if err != nil {
 		return Analyzed{}, err
 	}
-	changes, diffHash, err := r.Changes()
+	changes, diffHash, skipped, err := r.Changes()
 	if err != nil {
 		return Analyzed{}, err
 	}
@@ -56,6 +57,9 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	baseline := analyze.Baseline(docs)
 	declarations, parseDiags := analyze.Declarations(sources)
 	parseDiags = append(parseDiags, sourceDiags...)
+	if names := summaryNames(skipped); names != "" {
+		parseDiags = append(parseDiags, model.Diagnostic{Op: "diff", Message: names})
+	}
 
 	// The project's construction does not depend on a goal baseline, so it is read
 	// before the baseline branch: a repository with a missing or conflicting
@@ -154,6 +158,30 @@ func (o Options) openCache(root string) (Cache, *store.Cache, []model.Diagnostic
 		}}
 	}
 	return Cache{Path: handle.Path(), State: "absent"}, handle, nil
+}
+
+// summaryNames describes changed paths that are directories on disk, naming a few
+// and counting the rest: a nested repository is one fact about the diff.
+func summaryNames(paths []string) string {
+	if len(paths) == 0 {
+		return ""
+	}
+	shown := paths
+	if len(shown) > 3 {
+		shown = shown[:3]
+	}
+	verb := "are"
+	if len(paths) == 1 {
+		verb = "is"
+	}
+	message := fmt.Sprintf(
+		"%d changed path%s a directory, not a file (nested repository or worktree): %s",
+		len(paths), " "+verb, strings.Join(shown, ", "),
+	)
+	if len(paths) > len(shown) {
+		message += fmt.Sprintf(", and %d more", len(paths)-len(shown))
+	}
+	return message + "; skipped"
 }
 
 // readSources reads the tracked files in the V1 language set. A tracked file that

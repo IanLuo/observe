@@ -73,7 +73,7 @@ func TestChangesHashTracksTheSelectedDiff(t *testing.T) {
 	dir := newRepo(t, map[string]string{"a.txt": "a\n"})
 	r := openRepo(t, dir)
 
-	changes, before, err := r.Changes()
+	changes, before, _, err := r.Changes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestChangesHashTracksTheSelectedDiff(t *testing.T) {
 	}
 
 	writeFile(t, dir, "a.txt", "a changed\n")
-	changes, after, err := r.Changes()
+	changes, after, _, err := r.Changes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestChangesAttributesTheDiffToEachPath(t *testing.T) {
 	writeFile(t, dir, "untracked.txt", "new\n")
 
 	r := openRepo(t, dir)
-	changes, hash, err := r.Changes()
+	changes, hash, _, err := r.Changes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestChangesReportsADeletedFileWithNoNewSide(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	changes, _, err := openRepo(t, dir).Changes()
+	changes, _, _, err := openRepo(t, dir).Changes()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestReadOnlySessionLeavesRepositoryUnchanged(t *testing.T) {
 	if _, err := r.TrackedFiles(); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := r.Changes(); err != nil {
+	if _, _, _, err := r.Changes(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := r.LockedSpecs(); err != nil {
@@ -216,7 +216,7 @@ func TestCommitIsEmptyForARepositoryWithoutCommits(t *testing.T) {
 	if commit != "" {
 		t.Fatalf("commit = %q, want empty", commit)
 	}
-	if _, _, err := r.Changes(); err != nil {
+	if _, _, _, err := r.Changes(); err != nil {
 		t.Fatalf("Changes on an unborn branch: %v", err)
 	}
 }
@@ -321,5 +321,29 @@ func TestTrackedFilesOmitsGitlinks(t *testing.T) {
 	}
 	if len(paths) == 0 {
 		t.Fatal("the regular file disappeared with the gitlink")
+	}
+}
+
+// An untracked nested repository appears in the status listing as a directory
+// entry. It has no line diff and cannot be read as a file, so Changes reports it
+// as skipped instead of failing.
+func TestChangesSkipsADirectoryEntry(t *testing.T) {
+	dir := newRepo(t, map[string]string{"main.go": "package main\n"})
+	if err := os.MkdirAll(filepath.Join(dir, ".claude", "worktrees", "agent-1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, dir, "init", "--quiet", filepath.Join(dir, ".claude", "worktrees", "agent-1"))
+
+	changes, _, skipped, err := openRepo(t, dir).Changes()
+	if err != nil {
+		t.Fatalf("one directory entry failed the pass: %v", err)
+	}
+	if len(skipped) != 1 || skipped[0] != ".claude/worktrees/agent-1" {
+		t.Fatalf("skipped = %v, want the nested worktree", skipped)
+	}
+	for _, change := range changes {
+		if strings.HasPrefix(change.Path, ".claude/") {
+			t.Fatalf("a directory was returned as a file change: %+v", change)
+		}
 	}
 }

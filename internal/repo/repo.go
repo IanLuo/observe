@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 )
 
 // Repo is an open working tree.
@@ -199,6 +200,11 @@ type Change struct {
 
 // Changes returns the selected diff split by changed path, plus its hash.
 //
+// A changed path that is a directory on disk — an untracked nested repository or
+// worktree — has no line diff and cannot be read as a file. It is returned in
+// skipped instead of failing the pass, because one such path must not cost the
+// whole analysis.
+//
 // Only the hash is durable; the diff and both bodies are transient
 // (.agents/specs/observe-progress-view.md, Data requirements). The hash covers
 // the status listing and every per-path diff, so a change that alters either is
@@ -206,15 +212,16 @@ type Change struct {
 //
 // Every git invocation here is a fixed read-only query. --no-ext-diff and
 // --no-textconv keep a repository's configured diff driver from running.
-func (r *Repo) Changes() ([]Change, string, error) {
+func (r *Repo) Changes() ([]Change, string, []string, error) {
 	out, err := r.git("status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	commit, err := r.Commit()
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
+	var skipped []string
 
 	hashInput := append([]byte{}, out...)
 	changes := make([]Change, 0, len(statusEntries(out)))
@@ -225,7 +232,7 @@ func (r *Repo) Changes() ([]Change, string, error) {
 		if commit != "" && !untracked {
 			diff, err := r.git("diff", "HEAD", "--no-ext-diff", "--no-textconv", "--no-color", "--", e.path)
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 			c.Diff = string(diff)
 
@@ -240,7 +247,7 @@ func (r *Repo) Changes() ([]Change, string, error) {
 				}
 				old, err := r.git("show", "HEAD:"+oldPath)
 				if err != nil {
-					return nil, "", err
+					return nil, "", nil, err
 				}
 				c.Old = old
 			}
@@ -248,8 +255,14 @@ func (r *Repo) Changes() ([]Change, string, error) {
 
 		if !strings.Contains(e.code, "D") {
 			body, err := r.ReadFile(e.path)
+			if errors.Is(err, syscall.EISDIR) {
+				// git marks an untracked directory with a trailing slash; the path a
+				// reader sees should not carry it.
+				skipped = append(skipped, strings.TrimSuffix(e.path, "/"))
+				continue
+			}
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 			c.New = body
 		}
@@ -260,7 +273,7 @@ func (r *Repo) Changes() ([]Change, string, error) {
 
 	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
 	sum := sha256.Sum256(hashInput)
-	return changes, hex.EncodeToString(sum[:]), nil
+	return changes, hex.EncodeToString(sum[:]), skipped, nil
 }
 
 // ParseLock reads the lock marker of a document. The marker must be its first
