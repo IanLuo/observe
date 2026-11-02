@@ -1,4 +1,4 @@
-// Header, live strip, goal rail, diff list, detail panel, conflicts, and footer.
+// Header, baseline, the per-file diff, detail panels, conflicts, and footer.
 // Each function renders server-decided values and nothing else: a badge always
 // carries the server's word for the state (architecture D5).
 
@@ -11,7 +11,7 @@ import {
   verificationStyle,
   type StatusStyle,
 } from "./dom";
-import { dirOf, fileKey, goalAreas, goalKey } from "./map";
+import { dirOf, goalAreas } from "./map";
 import { DiffFile, Goal, Ref, State } from "./types";
 
 export interface PanelHandlers {
@@ -85,98 +85,41 @@ export function renderBaseline(root: HTMLElement, state: State): void {
       : "Goal alignment unavailable: no usable locked spec. Browsing stays available.";
 }
 
-export function renderRail(root: HTMLElement, state: State, selected: string | null, h: PanelHandlers): void {
-  clear(root);
-  const goals = state.goals ?? [];
-  if (goals.length === 0) {
-    root.append(el("p", { class: "empty", text: state.baseline.state === "available" ? "No goals in the locked spec." : "No goals: goal alignment unavailable." }));
-    return;
-  }
-  goals.forEach((goal, i) => {
-    const key = goalKey(i);
-    const item = el("button", {
-      class: "rail-item" + (selected === key ? " selected" : ""),
-      ariaPressed: selected === key ? "true" : "false",
-      ariaLabel: `${goal.label} — ${relationStyle(goal.relation).word}`,
-    });
-    item.type = "button";
-    item.title = goal.heading.join(" › ") + " — " + goal.label;
-    item.append(
-      el("span", { class: "rail-head" }, [
-        el("span", { class: "label", text: goal.label }),
-        badge(relationStyle(goal.relation)),
-      ]),
-      el("span", {
-        class: "meta",
-        text: `${goalAreas(goal).length} area${goalAreas(goal).length === 1 ? "" : "s"} · ${(goal.evidence ?? []).length} link${(goal.evidence ?? []).length === 1 ? "" : "s"} · ${verificationStyle(goal.verification).word.toLowerCase()}`,
-      }),
-    );
-    item.addEventListener("click", () => h.onSelect(key));
-    item.addEventListener("keydown", (event) => {
-      const keys = Array.from(root.querySelectorAll<HTMLButtonElement>("button.rail-item"));
-      const at = keys.indexOf(item);
-      if (event.key === "ArrowDown" && keys[at + 1]) {
-        event.preventDefault();
-        keys[at + 1].focus();
-      }
-      if (event.key === "ArrowUp" && keys[at - 1]) {
-        event.preventDefault();
-        keys[at - 1].focus();
-      }
-    });
-    root.append(item);
-  });
-}
+/**
+ * renderFileDiff shows the changed lines of one file, in the detail panel where the
+ * file itself is shown. The diff belongs to the file: a separate list of every
+ * change in the repository repeats what the reader has already navigated past.
+ */
+export function renderFileDiff(root: HTMLElement, state: State, path: string, showDiff: boolean): void {
+  const file = (state.diff.files ?? []).find((f) => f.path === path);
+  if (!file) return;
 
-export function renderDiff(root: HTMLElement, state: State, showDiff: boolean, h: PanelHandlers): void {
-  clear(root);
-  const files = state.diff.files ?? [];
   root.append(
-    el("div", { class: "section-head" }, [
-      el("h2", { text: "Selected diff" }),
-      el("span", { class: "meta", text: `${files.length} file${files.length === 1 ? "" : "s"} · ${state.diff.hash ? state.diff.hash.slice(0, 12) : "no hash"}` }),
-    ]),
+    el("h3", { text: "Selected diff" }),
+    el("p", { class: "meta", text: `${file.status} · +${file.added} −${file.removed}` }),
   );
-  if (files.length === 0) {
-    root.append(el("p", { class: "empty", text: "No selected diff: the working tree is clean." }));
+  if (!showDiff) {
+    root.append(el("p", { class: "empty", text: "Diff lines hidden. The status is unchanged by this toggle." }));
     return;
   }
-  if (!showDiff) {
-    root.append(el("p", { class: "empty", text: "Diff highlight hidden. Status is unchanged by this toggle." }));
+  if (!file.lines || file.lines.length === 0) {
+    root.append(el("p", { class: "empty", text: "No line changes to show." }));
+    return;
   }
-  for (const file of files) {
-    const box = el("div", { class: "diff-file" });
-    box.append(
-      el("button", {
-        class: "diff-head" + (showDiff ? " changed" : ""),
-        ariaLabel: `${file.status} ${file.path}, ${file.added} added, ${file.removed} removed`,
-        title: file.path,
-      }, [
-        el("span", { class: "path", text: file.path }),
-        el("span", { class: "meta", text: `${file.status} · +${file.added} −${file.removed}` }),
+  const lines = el("div", { class: "lines" });
+  for (const line of file.lines) {
+    lines.append(
+      el("div", { class: line.kind === "added" ? "add" : "del" }, [
+        el("span", { class: "num", text: String(line.line) }),
+        el("span", { class: "text", text: (line.kind === "added" ? "+ " : "− ") + line.text }),
       ]),
     );
-    const head = box.firstElementChild as HTMLButtonElement;
-    head.type = "button";
-    head.addEventListener("click", () => h.onSelect(fileKey(file.path)));
-    if (showDiff && file.lines && file.lines.length) {
-      const lines = el("div", { class: "lines" });
-      for (const line of file.lines) {
-        lines.append(
-          el("div", { class: line.kind === "added" ? "add" : "del" }, [
-            el("span", { class: "num", text: String(line.line) }),
-            el("span", { class: "text", text: (line.kind === "added" ? "+ " : "− ") + line.text }),
-          ]),
-        );
-      }
-      if (file.truncated) lines.append(el("div", { class: "empty", text: `… ${file.truncated} more changed lines` }));
-      box.append(lines);
-    }
-    root.append(box);
   }
+  if (file.truncated) lines.append(el("div", { class: "empty", text: `… ${file.truncated} more changed lines` }));
+  root.append(lines);
 }
 
-export function renderDetail(root: HTMLElement, state: State, selected: string | null): void {
+export function renderDetail(root: HTMLElement, state: State, selected: string | null, showDiff = true): void {
   clear(root);
   const goals = state.goals ?? [];
 
@@ -194,6 +137,7 @@ export function renderDetail(root: HTMLElement, state: State, selected: string |
     root.append(el("div", { class: "crumbs", text: dirOf(path) + " › " }));
     root.append(el("div", { class: "path big", text: path }));
     if (file) root.append(diffFacts(file));
+    renderFileDiff(root, state, path, showDiff);
     root.append(linkedGoals(state, path));
     return;
   }

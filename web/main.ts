@@ -4,14 +4,13 @@
 import { Envelope, State } from "./types";
 import { dirOf, renderMap } from "./map";
 import { renderFileDetail, renderMapBar, renderModuleDetail, renderProject } from "./project";
+import { renderNav } from "./nav";
 import {
   renderBaseline,
   renderConflicts,
   renderDetail,
-  renderDiff,
   renderFooter,
   renderHeader,
-  renderRail,
 } from "./panels";
 
 const token = document.querySelector<HTMLMetaElement>("meta[name=observe-token]")?.content ?? "";
@@ -43,8 +42,7 @@ const view: View = {
 const nodes = {
   header: byId("header"),
   baseline: byId("baseline"),
-  rail: byId("rail"),
-  diff: byId("diff"),
+  nav: byId("nav"),
   map: byId("map"),
   mapbar: byId("mapbar"),
   detail: byId("detail"),
@@ -104,11 +102,15 @@ function render(): void {
   const shown: State = view.pending ? { ...state, freshness: "updating" } : state;
   renderHeader(nodes.header, shown, view.showDiff, handlers);
   renderBaseline(nodes.baseline, state);
-  renderRail(nodes.rail, state, view.selected, handlers);
-  renderDiff(nodes.diff, state, view.showDiff, handlers);
-  if (view.selected?.startsWith("s:")) renderFileDetail(nodes.detail, state, view.selected.slice(2));
+  renderNav(nodes.nav, state, {
+    selected: view.selected,
+    focus: view.focus,
+    onSelect: handlers.onSelect,
+    onFocus: handlers.onFocus,
+  });
+  if (view.selected?.startsWith("s:")) renderFileDetail(nodes.detail, state, view.selected.slice(2), view.showDiff);
   else if (view.selected?.startsWith("m:")) renderModuleDetail(nodes.detail, state, view.selected.slice(2));
-  else renderDetail(nodes.detail, state, view.selected);
+  else renderDetail(nodes.detail, state, view.selected, view.showDiff);
   renderConflicts(nodes.conflicts, state);
   renderFooter(nodes.footer, state);
 

@@ -7,7 +7,8 @@
 // line they start on so the reader can drill to the source.
 
 import { clear, el, svgEl } from "./dom";
-import { Module, State, Symbol } from "./types";
+import { renderFileDiff } from "./panels";
+import { Edge, Module, State, Symbol } from "./types";
 
 /** moduleKey is the selection key for a module node. */
 export const moduleKey = (dir: string): string => "m:" + dir;
@@ -482,7 +483,7 @@ function symbolText(symbols: Symbol[]): string {
  * renderFileDetail lists one file's symbols with their lines, and the imports that
  * point at it and away from it, so a node in the diagram resolves to source.
  */
-export function renderFileDetail(container: HTMLElement, state: State, path: string): void {
+export function renderFileDetail(container: HTMLElement, state: State, path: string, showDiff = true): void {
   clear(container);
   container.scrollTop = 0;
 
@@ -508,6 +509,8 @@ export function renderFileDetail(container: HTMLElement, state: State, path: str
   container.append(list);
   if (symbols.length === 0) container.append(el("p", { class: "muted", text: "No declarations in this file." }));
 
+  renderFileDiff(container, state, path, showDiff);
+
   const edges = state.structure?.file_edges ?? [];
   const imports = edges.filter((e) => e.from === path && e.kind !== "reference");
   const uses = edges.filter((e) => e.from === path && e.kind === "reference");
@@ -521,9 +524,7 @@ export function renderFileDetail(container: HTMLElement, state: State, path: str
   }
   if (uses.length) {
     container.append(el("h3", { text: "Uses from this module" }));
-    const deps = el("ul", { class: "deps" });
-    for (const edge of uses) deps.append(el("li", { text: `${edge.symbol} → ${edge.to}` }));
-    container.append(deps);
+    container.append(depsByFile(uses, (edge) => edge.to, (edge) => edge.symbol ?? ""));
   }
   if (importedBy.length) {
     container.append(el("h3", { text: "Imported by" }));
@@ -533,10 +534,27 @@ export function renderFileDetail(container: HTMLElement, state: State, path: str
   }
   if (usedBy.length) {
     container.append(el("h3", { text: "Used by" }));
-    const users = el("ul", { class: "deps" });
-    for (const edge of usedBy) users.append(el("li", { text: `${edge.from} (${edge.symbol})` }));
-    container.append(users);
+    container.append(depsByFile(usedBy, (edge) => edge.from, (edge) => edge.symbol ?? ""));
   }
+}
+
+/**
+ * depsByFile groups relations by the file on the other side, so one file with many
+ * used symbols is one line instead of twenty.
+ */
+function depsByFile(edges: Edge[], file: (edge: Edge) => string, name: (edge: Edge) => string): HTMLElement {
+  const byFile = new Map<string, string[]>();
+  for (const edge of edges) {
+    const key = file(edge);
+    const names = byFile.get(key) ?? [];
+    if (name(edge)) names.push(name(edge));
+    byFile.set(key, names);
+  }
+  const list = el("ul", { class: "deps" });
+  for (const [path, names] of [...byFile.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+    list.append(el("li", { text: names.length ? `${path}: ${names.join(", ")}` : path }));
+  }
+  return list;
 }
 
 /**
