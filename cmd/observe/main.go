@@ -133,14 +133,20 @@ func run(opts serve.Options, addr string, report, noOpen bool) error {
 	}
 	defer removeRun(root.Root())
 
+	// The page is opened before the first analysis and polls while it runs, so a
+	// slow repository shows progress instead of an empty window and a silent
+	// terminal.
+	if !noOpen {
+		openBrowser(url)
+	}
+	fmt.Printf("analysing %s\n", record.Path)
+
 	// A failed first analysis is reported by the view, not by exiting: the page
 	// stays available and offers retry (AC9).
 	if err := s.Refresh(context.Background()); err != nil {
 		fmt.Fprintf(os.Stderr, "observe: first analysis failed: %v\n", err)
-	}
-
-	if !noOpen {
-		openBrowser(url)
+	} else {
+		fmt.Println("ready")
 	}
 
 	stop := make(chan os.Signal, 1)

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"observe/internal/model"
 )
@@ -518,5 +519,44 @@ func TestPipelineSkipsATrackedPathThatIsADirectory(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("the skipped path was not reported: %v", st.Diagnostics)
+	}
+}
+
+// While an analysis is running the state must answer immediately with "updating",
+// not block: the page polls this route, and a blocked answer is indistinguishable
+// from a hang on a slow repository.
+func TestStateAnswersUpdatingWhileAnAnalysisRuns(t *testing.T) {
+	release := make(chan struct{})
+	s, err := New(Options{
+		RepoPath:  t.TempDir(),
+		CachePath: "",
+		Analysis: func(context.Context) (Analyzed, error) {
+			<-release
+			return Analyzed{Repository: "fixture"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- s.Refresh(context.Background()) }()
+
+	// Wait for the analysis to be in flight, then read the state with a deadline.
+	deadline := time.After(2 * time.Second)
+	for state(t, s).Freshness != "updating" {
+		select {
+		case <-deadline:
+			t.Fatal("the state never reported updating")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if got := state(t, s).Freshness; got != "current" {
+		t.Fatalf("freshness after the analysis = %q, want current", got)
 	}
 }

@@ -174,6 +174,19 @@ async function load(): Promise<void> {
     view.error = error instanceof Error ? error.message : String(error);
   }
   render();
+  followUp();
+}
+
+/**
+ * followUp re-reads the state while an analysis is still running.
+ *
+ * The first analysis can take seconds on a large repository, and the server answers
+ * "updating" meanwhile. Without this the page showed an empty picture until the
+ * reader pressed Refresh, which reads as a hang.
+ */
+function followUp(): void {
+  if (view.state?.freshness !== "updating") return;
+  window.setTimeout(() => void load(), 700);
 }
 
 async function mutate(path: string): Promise<void> {
