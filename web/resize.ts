@@ -42,26 +42,42 @@ export function installResize(gutter: HTMLElement): void {
   };
   set(width);
 
-  let dragging = false;
+  // The drag is measured as a delta from where it started, not from the pointer's
+  // absolute position: grabbing the edge of a handle must not snap the panel to the
+  // cursor.
+  let drag: { pointer: number; startX: number; startWidth: number } | null = null;
+
+  const finish = (): void => {
+    if (!drag) return;
+    try {
+      gutter.releasePointerCapture(drag.pointer);
+    } catch {
+      // The pointer is already gone; the capture is gone with it.
+    }
+    drag = null;
+    document.body.classList.remove("resizing");
+  };
+
   gutter.addEventListener("pointerdown", (event) => {
-    dragging = true;
-    gutter.setPointerCapture((event as PointerEvent).pointerId);
+    const e = event as PointerEvent;
+    if (e.button !== 0) return;
+    drag = { pointer: e.pointerId, startX: e.clientX, startWidth: width };
+    gutter.setPointerCapture(e.pointerId);
     document.body.classList.add("resizing");
     event.preventDefault();
   });
   gutter.addEventListener("pointermove", (event) => {
-    if (!dragging) return;
+    if (!drag) return;
+    const e = event as PointerEvent;
     // The panel grows as the pointer moves left, since it is anchored right.
-    set(window.innerWidth - (event as PointerEvent).clientX);
+    set(drag.startWidth + (drag.startX - e.clientX));
   });
-  const stop = (event: Event): void => {
-    if (!dragging) return;
-    dragging = false;
-    document.body.classList.remove("resizing");
-    gutter.releasePointerCapture((event as PointerEvent).pointerId);
-  };
-  gutter.addEventListener("pointerup", stop);
-  gutter.addEventListener("pointercancel", stop);
+  gutter.addEventListener("pointerup", finish);
+  gutter.addEventListener("pointercancel", finish);
+  // A pointer released over another element, or a capture lost to the browser, must
+  // end the drag: otherwise plain mouse movement keeps resizing the panel.
+  gutter.addEventListener("lostpointercapture", finish);
+  window.addEventListener("blur", finish);
 
   gutter.addEventListener("keydown", (event) => {
     if (event.key === "ArrowLeft") set(width + step);

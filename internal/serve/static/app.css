@@ -108,22 +108,34 @@ button:disabled { opacity: 0.55; cursor: default; }
 main {
   display: grid;
   /* the detail panel's width is set by web/resize.ts, which writes --detail-width */
-  grid-template-columns: 320px minmax(0, 1fr) 8px var(--detail-width, 380px);
+  grid-template-columns: 320px minmax(0, 1fr) 12px var(--detail-width, 380px);
   gap: 16px;
   padding: 16px 24px 8px;
   align-items: start;
 }
 
+/* The grab area is the empty gap between the map and the panel: negative margins let
+   the handle reach into it, so the pointer does not have to land on a thin sliver. */
 .gutter {
   align-self: stretch;
   min-height: 200px;
-  border-radius: 4px;
-  /* a faint centre line, so the handle is findable without hover */
-  background: linear-gradient(to right, transparent 3px, var(--border) 3px, var(--border) 5px, transparent 5px);
+  position: relative;
+  margin: 0 -16px;
   cursor: col-resize;
   touch-action: none;
 }
-.gutter:hover, .gutter:focus-visible { background: var(--border); outline: none; }
+.gutter::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--border);
+  transition: background 120ms, width 120ms;
+}
+.gutter:hover::after, .gutter:focus-visible::after { width: 3px; background: var(--accent); }
+.gutter:focus-visible { outline: none; }
 body.resizing { cursor: col-resize; user-select: none; }
 
 .left, .detail {
