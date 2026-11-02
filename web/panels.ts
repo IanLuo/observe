@@ -299,6 +299,12 @@ export function renderFooter(root: HTMLElement, state: State): void {
   const cache = state.cache;
   const parts: string[] = [];
   parts.push(cache.state === "disabled" ? "Cache disabled" : `Cache ${cache.state}${cache.path ? ": " + cache.path : ""}`);
-  for (const diagnostic of state.diagnostics ?? []) parts.push(diagnostic);
+
+  // A repository can produce many diagnostics; the strip shows the first few and
+  // counts the rest, so a broken dependency tree cannot swallow the page.
+  const diagnostics = state.diagnostics ?? [];
+  const shown = diagnostics.slice(0, 5);
+  parts.push(...shown);
+  if (diagnostics.length > shown.length) parts.push(`… ${diagnostics.length - shown.length} more`);
   root.textContent = parts.join(" · ");
 }

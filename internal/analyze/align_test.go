@@ -281,6 +281,9 @@ func TestPromptAgreementIsNotAConflict(t *testing.T) {
 
 // A changed file outside the language set is reported once, not once per side of
 // the change, so the diagnostics list stays readable.
+//
+// The summary names a few files and counts the rest: one line per changed
+// stylesheet turns the diagnostics strip into a wall of text.
 func TestAlignReportsANonSourceChangeOnce(t *testing.T) {
 	change := Change{
 		Path:   "internal/serve/static/app.css",
@@ -293,7 +296,36 @@ func TestAlignReportsANonSourceChangeOnce(t *testing.T) {
 	if len(diags) != 1 {
 		t.Fatalf("diagnostics = %+v, want exactly one", diags)
 	}
-	if got := diags[0].Message; got != "changed file is outside the V1 language set; its declarations stay unknown" {
+	if got := diags[0].Message; got != "1 changed file is outside the V1 language set (internal/serve/static/app.css); their declarations stay unknown" {
 		t.Errorf("message = %q", got)
+	}
+}
+
+// A diff touching many non-source files is one fact, so it is one diagnostic.
+func TestAlignSummarisesManyNonSourceChanges(t *testing.T) {
+	var changes []Change
+	for _, path := range []string{"a.css", "b.html", "c.json", "d.md", "e.yml"} {
+		changes = append(changes, Change{Path: path, Status: " M", Diff: "@@ -1 +1 @@\n-x\n+y\n", Old: []byte("x\n"), New: []byte("y\n")})
+	}
+	_, diags := Align(nil, nil, changes)
+	if len(diags) != 1 {
+		t.Fatalf("diagnostics = %d, want one summary: %+v", len(diags), diags)
+	}
+	want := "5 changed files are outside the V1 language set (a.css, b.html, c.json, and 2 more); their declarations stay unknown"
+	if diags[0].Message != want {
+		t.Errorf("message = %q, want %q", diags[0].Message, want)
+	}
+}
+
+// Vendored code is a dependency, not an unknown: a vendor diff must produce no
+// diagnostic at all, however large it is.
+func TestAlignSaysNothingAboutVendoredChanges(t *testing.T) {
+	changes := []Change{
+		{Path: "vendor/github.com/google/uuid/uuid.go", Status: "A ", Diff: "@@ -0,0 +1 @@\n+package uuid\n", New: []byte("package uuid\n")},
+		{Path: "web/node_modules/x/index.js", Status: "A ", Diff: "@@ -0,0 +1 @@\n+x\n", New: []byte("x\n")},
+	}
+	_, diags := Align(nil, nil, changes)
+	if len(diags) != 0 {
+		t.Fatalf("vendored changes produced %d diagnostics: %+v", len(diags), diags)
 	}
 }

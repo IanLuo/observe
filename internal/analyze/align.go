@@ -103,8 +103,20 @@ func Align(assessments []model.GoalAssessment, decls []Declaration, changes []Ch
 	var (
 		oldDecls, newDecls []Declaration
 		diags              []model.Diagnostic
+		outsideLang        []string
 	)
 	for _, c := range changes {
+		// A change this analyzer never reads contributes nothing and says nothing:
+		// vendored code is a dependency, not an unknown.
+		if OutOfScope(c.Path) {
+			continue
+		}
+		if !IsSourcePath(c.Path) {
+			// Reported once for the whole diff, not once per file: a stylesheet edit is
+			// one fact about the diff, not a hundred facts about the repository.
+			outsideLang = append(outsideLang, c.Path)
+			continue
+		}
 		sides := []struct {
 			body []byte
 			into *[]Declaration
@@ -123,6 +135,12 @@ func Align(assessments []model.GoalAssessment, decls []Declaration, changes []Ch
 			}
 			*side.into = append(*side.into, found...)
 		}
+	}
+	if len(outsideLang) > 0 {
+		diags = append(diags, model.Diagnostic{
+			Op:      "parse",
+			Message: outsideLanguageMessage(outsideLang),
+		})
 	}
 
 	// current is the post-diff tree: unchanged files plus the new side of every
@@ -284,6 +302,29 @@ func describeRefs(refs []model.EvidenceRef) string {
 	}
 	sort.Slice(parts, func(i, j int) bool { return parts[i] < parts[j] })
 	return strings.Join(parts, ", ")
+}
+
+// outsideLanguageMessage summarises one diff's files outside the language set,
+// naming a few and counting the rest.
+func outsideLanguageMessage(paths []string) string {
+	const shown = 3
+	names := paths
+	if len(names) > shown {
+		names = names[:shown]
+	}
+	message := fmt.Sprintf("%d changed file%s outside the V1 language set", len(paths), plural(len(paths)))
+	message += " (" + strings.Join(names, ", ")
+	if len(paths) > shown {
+		message += fmt.Sprintf(", and %d more", len(paths)-shown)
+	}
+	return message + "); their declarations stay unknown"
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return " is"
+	}
+	return "s are"
 }
 
 // containsDiagnostic reports whether the same report is already collected.

@@ -60,11 +60,14 @@ func Declarations(files []File) ([]Declaration, []model.Diagnostic) {
 	for _, f := range files {
 		lang, ok := languageFor(f.Path)
 		if !ok {
-			diags = append(diags, model.Diagnostic{
-				Path:    f.Path,
-				Op:      "parse",
-				Message: "changed file is outside the V1 language set; its declarations stay unknown",
-			})
+			// Third-party code is excluded by policy, so silence is the honest answer.
+			if !OutOfScope(f.Path) {
+				diags = append(diags, model.Diagnostic{
+					Path:    f.Path,
+					Op:      "parse",
+					Message: "outside the V1 language set; its declarations stay unknown",
+				})
+			}
 			continue
 		}
 
@@ -105,17 +108,26 @@ func IsSourcePath(p string) bool {
 	return ok
 }
 
-// languageFor maps a path to one of the V1 languages.
+// OutOfScope reports whether a path is third-party code this analyzer never reads.
 //
-// Files under a dependency or vendor directory are excluded: they are third
-// party code, so a requirement naming a symbol found there says nothing about
-// this project's implementation.
-func languageFor(p string) (string, bool) {
+// A vendor or dependency directory is a policy exclusion, not an unknown: it is
+// this project's dependency, not its implementation, so its files are neither
+// parsed nor reported. Saying "unknown" about every vendored file would bury the
+// files that matter.
+func OutOfScope(p string) bool {
 	slash := "/" + p
 	for _, dir := range []string{"/node_modules/", "/vendor/"} {
 		if strings.Contains(slash, dir) {
-			return "", false
+			return true
 		}
+	}
+	return false
+}
+
+// languageFor maps a path to one of the V1 languages.
+func languageFor(p string) (string, bool) {
+	if OutOfScope(p) {
+		return "", false
 	}
 	lang, ok := sourceLanguage[path.Ext(p)]
 	return lang, ok
