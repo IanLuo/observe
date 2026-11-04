@@ -233,3 +233,45 @@ func TestSmallUnreadableShareKeepsTheViolation(t *testing.T) {
 		t.Errorf("reason %q does not name the unread code", check.Reason)
 	}
 }
+
+// The subject is the file itself: a path that does not exist under an existing
+// module is not present just because its directory is.
+func TestFileChecksNameTheFileNotItsDirectory(t *testing.T) {
+	result := analyzeFixture(t, checkSpec(
+		"file-there: file internal/a/a.go exists",
+		"file-gone: file internal/a/missing.go exists",
+		"file-absent: file internal/a/missing.go absent",
+	), fixture(), nil, Coverage{})
+
+	if got := checkNamed(t, result, "file-there").Status; got != model.CheckPass {
+		t.Errorf("existing file = %q, want pass", got)
+	}
+	if got := checkNamed(t, result, "file-gone").Status; got != model.CheckViolated {
+		t.Errorf("missing file = %q, want violated", got)
+	}
+	if got := checkNamed(t, result, "file-absent").Status; got != model.CheckPass {
+		t.Errorf("absent missing file = %q, want pass", got)
+	}
+}
+
+// A pass that rests on finding nothing records what it inspected, so the panel can
+// show the search instead of an empty list.
+func TestAbsencePassesRecordWhatWasInspected(t *testing.T) {
+	result := analyzeFixture(t, checkSpec(
+		"symbol-absent: symbol Ledger absent",
+		"module-absent: module internal/nowhere absent",
+	), fixture(), nil, Coverage{})
+
+	for _, id := range []string{"symbol-absent", "module-absent"} {
+		check := checkNamed(t, result, id)
+		if check.Status != model.CheckPass {
+			t.Fatalf("%s status = %q, want pass", id, check.Status)
+		}
+		if check.Inspected == 0 {
+			t.Errorf("%s inspected nothing, so the verdict cannot be shown", id)
+		}
+		if len(check.Evidence) != 0 {
+			t.Errorf("%s carries evidence for an absence: %+v", id, check.Evidence)
+		}
+	}
+}

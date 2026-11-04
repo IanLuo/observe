@@ -176,7 +176,14 @@ export function renderDetail(root: HTMLElement, state: State, selected: string |
         el("div", { class: "meta", text: facts.join(" · ") }),
       ]);
       if (check.reason) row.append(el("p", { class: "meta", text: check.reason }));
-      if ((check.evidence ?? []).length > 0) row.append(evidenceList(check.evidence ?? []));
+      const evidence = check.evidence ?? [];
+      if (evidence.length > 0) {
+        row.append(evidenceList(evidence));
+      } else if (check.status === "pass" && check.inspected > 0) {
+        // A verdict that rests on finding nothing must say what it looked through;
+        // an empty panel reads as "no evidence" for what is actually the evidence.
+        row.append(el("p", { class: "meta", text: `no match among ${check.inspected} item${check.inspected === 1 ? "" : "s"} inspected` }));
+      }
       list.append(row);
     }
     root.append(list);

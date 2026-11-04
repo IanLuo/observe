@@ -80,10 +80,16 @@ func evaluate(checks []rawCheck, decls []Declaration, st Structure, coverage Cov
 	for _, e := range st.Edges {
 		edges[e.From] = append(edges[e.From], e)
 	}
+	files := map[string]bool{}
+	for _, m := range st.Modules {
+		for _, f := range m.Files {
+			files[f] = true
+		}
+	}
 
 	out := make([]model.Check, len(checks))
 	for i, c := range checks {
-		out[i] = decide(c, modules, symbols, edges, coverage)
+		out[i] = decide(c, modules, symbols, edges, files, coverage)
 	}
 	return out
 }
@@ -93,7 +99,7 @@ func evaluate(checks []rawCheck, decls []Declaration, st Structure, coverage Cov
 // A subject that cannot be reached is unknown, not violated: "the code does not
 // say this" and "I could not read the code" are different answers, and the third
 // verdict exists to keep them apart.
-func decide(c rawCheck, modules map[string]Module, symbols map[string][]Declaration, edges map[string][]ModuleEdge, coverage Coverage) model.Check {
+func decide(c rawCheck, modules map[string]Module, symbols map[string][]Declaration, edges map[string][]ModuleEdge, files map[string]bool, coverage Coverage) model.Check {
 	kind, name, _ := strings.Cut(c.Subject, " ")
 	out := model.Check{
 		ID:        c.ID,
@@ -112,6 +118,12 @@ func decide(c rawCheck, modules map[string]Module, symbols map[string][]Declarat
 		out.Status = status
 		out.Reason = reason
 		out.Evidence = evidence
+		return out
+	}
+	// absent passes have nothing to point at, so they say what they looked at.
+	clear := func(inspected int) model.Check {
+		out.Status = model.CheckPass
+		out.Inspected = inspected
 		return out
 	}
 	// unreadable keeps a missing subject honest: unknown when the unreadable code is
@@ -139,7 +151,7 @@ func decide(c rawCheck, modules map[string]Module, symbols map[string][]Declarat
 			return unreadable("no declaration named " + name)
 		case "absent":
 			if len(found) == 0 {
-				return verdict(model.CheckPass, "", nil)
+				return clear(len(symbols))
 			}
 			return verdict(model.CheckViolated, name+" is still declared", symbolRefs(found))
 		}
@@ -154,7 +166,7 @@ func decide(c rawCheck, modules map[string]Module, symbols map[string][]Declarat
 			return unreadable("no module at " + name)
 		case "absent":
 			if !exists {
-				return verdict(model.CheckPass, "", nil)
+				return clear(len(modules))
 			}
 			return verdict(model.CheckViolated, "module "+name+" still exists", moduleRefs(module))
 		case "has-test":
@@ -178,25 +190,28 @@ func decide(c rawCheck, modules map[string]Module, symbols map[string][]Declarat
 			case c.Assertion == "imports":
 				return verdict(model.CheckViolated, name+" imports nothing from "+c.Argument, nil)
 			case len(found) == 0:
-				return verdict(model.CheckPass, "", nil)
+				return clear(len(module.Files))
 			default:
 				return verdict(model.CheckViolated, name+" imports "+c.Argument, edgeRefs(found))
 			}
 		}
 
 	case "file":
-		_, exists := modules[path.Dir(name)]
+		// The subject is the file itself. Reading its directory as the answer made
+		// every path under an existing module look present.
+		if files[name] {
+			switch c.Assertion {
+			case "exists":
+				return verdict(model.CheckPass, "", []model.EvidenceRef{fileRef(name)})
+			case "absent":
+				return verdict(model.CheckViolated, "file "+name+" still exists", []model.EvidenceRef{fileRef(name)})
+			}
+		}
 		switch c.Assertion {
 		case "exists":
-			if exists {
-				return verdict(model.CheckPass, "", []model.EvidenceRef{fileRef(name)})
-			}
 			return unreadable("no file at " + name)
 		case "absent":
-			if !exists {
-				return verdict(model.CheckPass, "", nil)
-			}
-			return verdict(model.CheckViolated, "file "+name+" still exists", []model.EvidenceRef{fileRef(name)})
+			return clear(len(files))
 		}
 	}
 

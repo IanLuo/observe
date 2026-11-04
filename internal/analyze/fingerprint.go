@@ -10,7 +10,7 @@ import (
 // AnalyzerVersion changes whenever a rule in this package changes what it emits.
 // It is part of the input fingerprint, so an upgrade invalidates a cache record
 // written by an older rule set instead of presenting old statuses as current.
-const AnalyzerVersion = "observe-analyzer/2"
+const AnalyzerVersion = "observe-analyzer/3"
 
 // FingerprintInput is everything an analysis depends on. It has no prompt field
 // on purpose: a task prompt is transient context, never an input that could

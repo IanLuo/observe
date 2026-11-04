@@ -116,6 +116,9 @@ type Check struct {
 	Status    CheckStatus
 	Reason    string // why the verdict is unknown; empty for pass and violated
 	Evidence  []EvidenceRef
+	// Inspected is what a verdict rests on when there is nothing to point at: a
+	// passing "absent" or "not-imports" check inspects a set and finds nothing.
+	Inspected int
 	Touched   bool
 	SpecPath  string
 	Line      int // where the check is declared, 1-based

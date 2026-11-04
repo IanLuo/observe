@@ -25,6 +25,7 @@ export interface Check {
   status: CheckStatus;
   reason?: string;
   evidence: Ref[];
+  inspected: number;
   touched: boolean;
   spec_path: string;
   line: number;

@@ -134,6 +134,7 @@ type Check struct {
 	Status    string `json:"status"`
 	Reason    string `json:"reason,omitempty"`
 	Evidence  []Ref  `json:"evidence"`
+	Inspected int    `json:"inspected"`
 	Touched   bool   `json:"touched"`
 	SpecPath  string `json:"spec_path"`
 	Line      int    `json:"line"`
@@ -256,6 +257,7 @@ func goals(assessments []model.GoalAssessment, freshness string) []Goal {
 				Status:    string(c.Status),
 				Reason:    c.Reason,
 				Evidence:  refs(c.Evidence),
+				Inspected: c.Inspected,
 				Touched:   c.Touched,
 				SpecPath:  c.SpecPath,
 				Line:      c.Line,
