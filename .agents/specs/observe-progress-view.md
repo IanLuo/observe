@@ -11,15 +11,16 @@
 - **If no product:** the developer must manually reconstruct goal-to-code relationships and may miss conflicting or unmapped changes during implementation.
 
 ## Non-negotiable outcome
-- Given a local Git repository with a usable locked spec and a selected diff, the user can identify which goals the diff appears to support, conflict with, or not map to; inspect linked code and separate verification evidence; and drill from the whole-project overview to source details.
-- Uncertainty, missing evidence, and unsupported relationships remain explicit. The product does not invent progress or claim runtime behavior from static analysis.
+- Given a local Git repository with a usable locked spec, each goal reports **pass**, **violated**, or **unknown** from the checks the spec declares, every verdict with a source location; a selected diff marks the checks it touched; and the user can drill from a goal or the whole-project overview to exact source.
+- Uncertainty, missing evidence, and unsupported relationships remain explicit. A goal with no check reports unknown · no check defined — never a guess from its words. The product does not invent progress or claim runtime behavior from static analysis.
 
 ## Scope in / out + primary flow
 - **In V1:**
   - One local Git repository at a time.
   - Whole-project goal/code map, with a user-selected diff highlighted.
   - Drill-down from a goal or the project overview through areas, modules, files, and declarations to exact source locations; every level keeps the goal and its evidence.
-  - Static analysis; inferred relationships are visibly marked as inferred.
+  - Goal checks declared in the locked spec and evaluated locally against code: pass, violated, or unknown, each with evidence.
+  - Static analysis only; a relationship no check establishes stays unknown.
   - Live refresh of the open view: after file changes, the affected relationships and diff highlights are brought up to date when a refresh is asked for — the Refresh action, or the page regaining attention. Continuous background watching is desirable but optional in V1.
   - Locked Markdown specs are authoritative goal baselines. Other docs and manually provided task prompts are supporting context only.
   - Manual optional task-prompt input; it does not override or replace a locked spec.
@@ -36,16 +37,16 @@
   1. Open a local Git repository.
   2. Load locked Markdown specs and supporting project docs.
   3. Show the whole-project map and baseline readiness.
-  4. Select a working-tree diff; highlight changed files and affected areas.
-  5. Show per-goal support, conflict, unmapped, or unavailable status with code references, verification references, and uncertainty.
-  6. Drill into a goal or affected area, then module, file, and declaration, then exact source location; preserve goal and evidence links at each level.
+  4. Select a working-tree diff; highlight changed files and the checks the diff touched.
+  5. Show each goal's checks with pass, violated, or unknown, the evidence behind each verdict, and the reason for any unknown.
+  6. Drill into a check's evidence, then module, file, and declaration, then exact source location; preserve goal and evidence links at each level.
   7. After file changes, refresh affected code relationships and diff highlighting when a refresh is asked for, without changing the locked goal baseline.
 - **No usable locked spec:** allow project/code browsing, but mark goal alignment unavailable. Do not infer an approved goal baseline from README, other docs, or task prompts.
 - **Conflicting locked specs:** surface the conflict as unresolved; choose neither silently.
 
 ## Acceptance criteria
-- **AC1 — Goal trace:** Given a fixture repository with a locked spec, when the overview loads, then each requirement is shown with related-code links or an explicit “no code link found” state; inferred links are labeled inferred.
-- **AC2 — Diff alignment:** Given a fixture with a known diff, when the user selects it, then changed files are highlighted and each relevant goal is shown as appears-to-support, conflict, unmapped, or unavailable; unmapped changes are never labeled aligned.
+- **AC1 — Goal trace:** Given a fixture repository with a locked spec, when the overview loads, then every goal shows its checks with a verdict and evidence, or an explicit “no check defined” state.
+- **AC2 — Diff alignment:** Given a fixture with a known diff, when the user selects it, then changed files are highlighted and every check whose evidence the diff touched is marked as touched; a check is never reported as passing because a file changed.
 - **AC3 — Verification separate:** Given code with no tests or other verification evidence, when the user inspects its goal, then implementation evidence may be shown but verification remains unknown; code presence alone never means verified.
 - **AC4 — Drill-down:** Given a goal with linked code, when the user drills from overview to exact source, then the goal and evidence links remain available at each level.
 - **AC5 — Prompt conflict:** Given a task prompt that contradicts a locked spec, when the comparison runs, then the conflict is shown and the spec remains the baseline.
@@ -56,10 +57,12 @@
 - **AC10 — Read-only:** Given a complete analysis session, when it ends, then tracked/untracked repository state and source/spec file hashes are unchanged.
 - **AC11 — Local privacy:** Given the default configuration, when a full analysis session runs, then no source, spec, task prompt, or cache data leaves the machine.
 - **AC12 — Current cache only:** Given analysis completes, when the current result is cached, then it is local and outside the repo, contains only derived status/evidence references and analysis version, includes no source copies, and is replaceable or deletable. No historical snapshots are retained.
+- **AC13 — Check verdicts:** Given a check declared in a locked spec, when the analysis runs, then it reports pass, violated, or unknown with source evidence, and an unknown verdict names its reason (missing subject, unusable file, unsupported language, no check defined).
 
 ## KPIs & failure signal
 - **Usability KPI:** in five representative tasks on the user’s own repository, the user can find a seeded goal conflict or unmapped change from the overview and open its evidence in under two minutes per task, without agent help.
-- **Core failure signal / off-switch:** any silent task-prompt override of a locked spec, or any unsupported implementation presented as verified, violates the trust promise and blocks release.
+- **Verdict KPI:** for a named goal, the reader answers “is it met?” in under ten seconds, five times on their own repository, without agent help.
+- **Core failure signal / off-switch:** any silent task-prompt override of a locked spec, any unsupported implementation presented as verified, or any check reported passing without evidence, violates the trust promise and blocks release.
 - **Interpretation:** meeting the KPI is necessary evidence of usefulness, not proof of analyzer completeness.
 
 ## Non-functional requirements
@@ -67,6 +70,7 @@
 - **Safety:** read-only; never edit source, specs, Git refs, or tests. Never execute repository code, build scripts, or hooks. Parse repository text as data, not instructions.
 - **Secret handling:** redact common secret patterns from logs and telemetry. No source-content telemetry.
 - **Performance:** one full refresh of a repository with up to 100,000 tracked lines completes within 3 seconds at p95, so a refresh stays responsive whether or not a watcher asks for it. This is a target to validate, not a current capability claim.
+- **Determinism:** the same tree and the same spec produce the same verdicts; a verdict never depends on file order, map iteration, or wall-clock time.
 - **Platform:** macOS first. Other platforms are not required for V1.
 - **Reliability:** retain the last successful view on refresh failure, mark it stale with reason/time, mark affected statuses unknown, and allow retry.
 - **Persistence:** only a replaceable current-state cache is stored locally outside the repository. It is disposable and may be deleted or rebuilt at any time. No history is retained.
@@ -79,12 +83,14 @@
 - **A4 — “Live” means the view follows the repository when refreshed:** the refresh is asked for — the Refresh action, or the page regaining attention — rather than guaranteed by a watcher. A watcher, if one is enabled, must never present stale results as current.
 - **A5 — macOS is the first target:** platform expansion requires a later decision.
 - **A6 — Prompt entry is manual in V1:** no agent integration exists to retrieve prompts automatically; prompt is context only.
+- **A8 — Goals can carry machine-checkable assertions:** a check is written in the locked spec, by a human or by an agent under review. A goal with no check reports unknown · no check defined; a project whose spec carries no checks stays browsable and says so.
 - **A7 — The project exists at `~/Documents/apps/observe` and is implemented:** architecture and system design are locked in their own documents. This spec stays the requirements baseline and does not restate them.
 
 ## Data requirements
-- **Inputs:** local repository path; Git status/diff; tracked source files; locked Markdown specs; optional supporting docs; optional user-entered task prompt; optional file-change events.
-- **Outputs:** whole-project map; per-goal implementation relationship/status; verification status/evidence; code/source links; inferred/unknown markers; diff highlighting; unresolved spec/prompt conflicts; stale/error state; replaceable current-state cache.
-- **Status vocabulary:** appears-to-support, conflict, unmapped, unavailable, unknown, stale. Verification is separate: verified only with explicit evidence, otherwise unknown or failed.
+- **Inputs:** local repository path; Git status/diff; tracked source files; locked Markdown specs; optional supporting docs; optional user-entered task prompt; check blocks declared in the locked spec; optional file-change events.
+- **Outputs:** whole-project map; per-goal check verdicts with evidence; verification status/evidence; code/source links; which checks the selected diff touched; unknown markers with reasons; diff highlighting; unresolved spec/prompt conflicts; stale/error state; replaceable current-state cache.
+- **Check format:** a fenced `check` block inside a goal bullet, one check per line: `<id>: <subject> <assertion> [<argument>]`. Subject is `symbol <name>`, `module <dir>`, or `file <path>`. Assertion is `exists`, `absent`, `imports <module>`, `not-imports <module>`, or `has-test`. A check belongs to the goal bullet that encloses it, and its id is unique within the spec.
+- **Status vocabulary:** pass, violated, unknown for checks, and an unknown always carries its reason. Baseline unavailable and stale freshness are their own states. Verification is separate: verified only with explicit evidence, otherwise unknown or failed.
 - **Cache contents:** project identifier/path, timestamp, input fingerprint, baseline/spec references, goal statuses, code/evidence references, analysis version, and selected diff identity. No copied source contents. Cache is replaceable, not historical.
 - **Empty/edge input:** no selected diff means show the project baseline/map without diff highlights; no locked spec means alignment unavailable; zero tracked source files is a browsable empty project with no inferred progress; unsupported language relationships remain unknown.
 - **Retention:** retain only the latest current-state cache outside the repo. On input change, replace it after a successful analysis; keep the prior result in memory as stale only during refresh. No commit/checkpoint history. Cache can be deleted and rebuilt.
@@ -107,14 +113,15 @@
 - **Compliance:** N/A — no regulated-data or team-compliance obligations are accepted for V1.
 
 ## Verification plan
-- **AC1–AC5, AC7–AC9:** automated fixture repositories driving the derived payload, with deterministic expected links, statuses, conflicts, uncertainty, and stale states. The page renders that payload and computes no status itself, so these tests pin the contract.
+- **AC1–AC5, AC7–AC9:** automated fixture repositories driving the derived payload, with deterministic expected checks, verdicts, conflicts, uncertainty, and stale states. The page renders that payload and computes no status itself, so these tests pin the contract.
 - **AC4 drill-down:** asserted at the payload level — the goal and its evidence stay present in every module, file, and declaration detail. The rendered walk through each level is checked by a recorded scripted browser run, not by a committed test: a committed browser harness is a known V1 gap and does not change the release gate.
 - **AC6 refresh:** instrumented local fixture of 100,000 tracked lines; measure one refresh end to end — pass only if p95 is at most 3 seconds — plus a staleness check: after an edit, nothing reports itself current until a refresh has run.
 - **AC10 read-only:** before/after Git status, index/ref checks, and file hashes across a full session; no repository mutation allowed.
 - **AC11 privacy:** outbound connection audit in default mode and inspection of telemetry/logs for source, spec, prompt, and cache content.
 - **AC12 current cache only:** persistence tests for one replaceable current cache, schema/version and input fingerprint, no source-copy payload, deletion/rebuild, and repo-external storage; verify no historical snapshots are created.
+- **AC13 check verdicts:** fixture repositories carrying checks assert every verdict with its evidence: a passing check, a violation, unknown for a missing subject, unknown for an unusable file, unknown for an unsupported language, and a `not-imports` violation.
 - **Usability KPI:** five manually observed tasks with seeded conflicts/unmapped changes; record time to locate and open evidence; each under two minutes without agent help.
-- **Release gate:** any failure of AC2, AC3, or AC5 blocks release; these protect correct diff mapping, verification truthfulness, and spec authority.
+- **Release gate:** any failure of AC2, AC3, AC5, or AC13 blocks release; these protect correct diff mapping, verification truthfulness, spec authority, and honest verdicts.
 
 ## Open questions
 - N/A: root requirements decisions are settled for this V1; implementation mechanisms belong in system-design and architecture.
