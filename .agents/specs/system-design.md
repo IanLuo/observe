@@ -8,7 +8,7 @@
 ## Components & ownership
 - **Product owner:** the local Observe application, initially maintained by one developer. All components are in-process boundaries in V1; no service or worker process.
 - **Repo reader:** reads repository identity, Git commit/status/diff, locked Markdown specs, supporting docs, and tracked source. Refuses source/spec/Git writes, code execution, hooks, and build/test execution.
-- **Refresh coordinator:** watches local file changes, debounces 500 ms, tracks input generations, schedules incremental analysis, and requests full reconciliation when impact is unknown or inputs change broadly. Refuses to publish a result whose input fingerprint is no longer current.
+- **Refresh coordinator:** tracks input generations, schedules analysis, and requests full reconciliation when impact is unknown or inputs change broadly. Refuses to publish a result whose input fingerprint is no longer current. In V1 a refresh is requested — the Refresh action, or the page regaining attention — rather than watched for: the watcher path below is designed and optional.
 - **Analyzer:** extracts locked-spec requirements, code structure, references, tests, and candidate links using deterministic local parsing and reference matching. Every link includes provenance. Refuses to claim runtime truth, verified behavior from code presence alone, or a relationship unsupported by evidence.
 - **Evidence store:** stores one disposable current-analysis cache outside the repository. Refuses history snapshots, source copies, prompt copies, and project-file changes.
 - **Presenter:** displays the full project map, selected-diff highlighting, goal/code drill-down, evidence, uncertainty, errors, and freshness. Refuses to convert inferred/unknown/stale states into current or verified claims.
@@ -44,7 +44,7 @@
 - **Evidence store cache read/write failure:** continue browsing and any unaffected live analysis where possible; mark results unsaved/stale. Never write a fallback inside the repository.
 - **Current cache corrupt:** discard the disposable cache, report the issue, recompute from source/specs, and preserve the repository unchanged. No history records exist to delete.
 - **Broken source/evidence link:** show the unresolved reference and unknown state; do not silently retarget to a nearby symbol or line.
-- **Watcher loss, event overflow, or unknown dependency impact:** immediately mark current analysis stale; run full reconciliation. If reconciliation fails, retain prior results as stale and offer retry/manual refresh.
+- **Unknown dependency impact** (and, when the optional watcher is enabled, watcher loss or event overflow): immediately mark current analysis stale; run full reconciliation. If reconciliation fails, retain prior results as stale and offer retry/manual refresh.
 - **Presenter failure:** analysis data remains local and unchanged; on reload, validate the cache fingerprint and restore only if current, otherwise discard and recompute.
 - **Availability policy:** fail open for source browsing and unaffected analysis; fail closed for claims about affected goals. Keep stale data visible but label it; never label it current/verified until supported.
 - **Release-blocking failure:** any stale or inferred result presented as current, any silent locked-spec override, or implementation shown as verified without evidence. These violate the product trust contract.

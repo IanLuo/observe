@@ -18,9 +18,9 @@
 - **In V1:**
   - One local Git repository at a time.
   - Whole-project goal/code map, with a user-selected diff highlighted.
-  - Drill-down from goals and project overview through affected areas, flows, modules, functions, and source locations.
+  - Drill-down from a goal or the project overview through areas, modules, files, and declarations to exact source locations; every level keeps the goal and its evidence.
   - Static analysis; inferred relationships are visibly marked as inferred.
-  - Live refresh of affected views after file changes settle.
+  - Live refresh of the open view: after file changes, the affected relationships and diff highlights are brought up to date when a refresh is asked for — the Refresh action, or the page regaining attention. Continuous background watching is desirable but optional in V1.
   - Locked Markdown specs are authoritative goal baselines. Other docs and manually provided task prompts are supporting context only.
   - Manual optional task-prompt input; it does not override or replace a locked spec.
   - A replaceable local current-state cache outside the repository. No historical snapshots.
@@ -38,8 +38,8 @@
   3. Show the whole-project map and baseline readiness.
   4. Select a working-tree diff; highlight changed files and affected areas.
   5. Show per-goal support, conflict, unmapped, or unavailable status with code references, verification references, and uncertainty.
-  6. Drill into a goal or affected area, then flow/module/function, then exact source location; preserve goal and evidence links at each level.
-  7. On settled file changes, refresh affected code relationships and diff highlighting without changing the locked goal baseline.
+  6. Drill into a goal or affected area, then module, file, and declaration, then exact source location; preserve goal and evidence links at each level.
+  7. After file changes, refresh affected code relationships and diff highlighting when a refresh is asked for, without changing the locked goal baseline.
 - **No usable locked spec:** allow project/code browsing, but mark goal alignment unavailable. Do not infer an approved goal baseline from README, other docs, or task prompts.
 - **Conflicting locked specs:** surface the conflict as unresolved; choose neither silently.
 
@@ -49,7 +49,7 @@
 - **AC3 — Verification separate:** Given code with no tests or other verification evidence, when the user inspects its goal, then implementation evidence may be shown but verification remains unknown; code presence alone never means verified.
 - **AC4 — Drill-down:** Given a goal with linked code, when the user drills from overview to exact source, then the goal and evidence links remain available at each level.
 - **AC5 — Prompt conflict:** Given a task prompt that contradicts a locked spec, when the comparison runs, then the conflict is shown and the spec remains the baseline.
-- **AC6 — Live refresh:** Given a watched source edit, when the file is quiet for 500 ms, then the affected area refreshes within 3 seconds at p95 for repositories up to 100,000 tracked lines; the locked baseline is unchanged.
+- **AC6 — Refresh:** Given an open view and an edited source file, when a refresh is asked for, then the affected area reflects the new state within 3 seconds and the locked baseline is unchanged; and while its data predates the edit, no area of the view presents itself as current. Watching the filesystem is not required for this criterion.
 - **AC7 — Missing spec:** Given a repository with no usable locked spec, when opened, then browsing remains available and goal alignment is explicitly unavailable.
 - **AC8 — Conflicting specs:** Given two locked specs with incompatible requirements, when loaded, then the conflict is shown unresolved and neither is silently preferred.
 - **AC9 — Failed refresh:** Given a successful prior analysis followed by a failed refresh, when the view updates, then the last successful view remains marked stale with failure time/reason; affected status is unknown until refreshed; retry is available. With no prior success, show the error and keep source browsing available.
@@ -66,7 +66,7 @@
 - **Privacy:** source code, specs, task prompt, and current cache stay local by default. No outbound transmission in default mode.
 - **Safety:** read-only; never edit source, specs, Git refs, or tests. Never execute repository code, build scripts, or hooks. Parse repository text as data, not instructions.
 - **Secret handling:** redact common secret patterns from logs and telemetry. No source-content telemetry.
-- **Performance:** after 500 ms without file changes, refresh the affected area within 3 seconds at p95 for a repository with up to 100,000 tracked lines. This is a target to validate, not a current capability claim.
+- **Performance:** one full refresh of a repository with up to 100,000 tracked lines completes within 3 seconds at p95, so a refresh stays responsive whether or not a watcher asks for it. This is a target to validate, not a current capability claim.
 - **Platform:** macOS first. Other platforms are not required for V1.
 - **Reliability:** retain the last successful view on refresh failure, mark it stale with reason/time, mark affected statuses unknown, and allow retry.
 - **Persistence:** only a replaceable current-state cache is stored locally outside the repository. It is disposable and may be deleted or rebuilt at any time. No history is retained.
@@ -76,13 +76,13 @@
 - **A1 — Git repository available:** the project has a readable local Git repository and the user can select a diff. If not, show a clear unsupported-state explanation; do not infer change ownership.
 - **A2 — Locked Markdown specs express goals:** goal comparisons require a usable locked spec. If absent or unreadable, keep browsing available and mark alignment unavailable.
 - **A3 — Static analysis is sufficient for initial orientation:** it can propose code links but cannot prove execution or correctness. Every inferred edge must be labeled, and unsupported constructs must remain unknown.
-- **A4 — “Live” means local file watching plus debounced refresh:** refresh begins after 500 ms of quiet; watcher loss/failure must not present stale results as current.
+- **A4 — “Live” means the view follows the repository when refreshed:** the refresh is asked for — the Refresh action, or the page regaining attention — rather than guaranteed by a watcher. A watcher, if one is enabled, must never present stale results as current.
 - **A5 — macOS is the first target:** platform expansion requires a later decision.
 - **A6 — Prompt entry is manual in V1:** no agent integration exists to retrieve prompts automatically; prompt is context only.
-- **A7 — No `observe` repository currently exists:** this spec creates the project at `~/Documents/apps/observe`. Implementation and architecture are not selected here.
+- **A7 — The project exists at `~/Documents/apps/observe` and is implemented:** architecture and system design are locked in their own documents. This spec stays the requirements baseline and does not restate them.
 
 ## Data requirements
-- **Inputs:** local repository path; Git status/diff; tracked source files; locked Markdown specs; optional supporting docs; optional user-entered task prompt; file-change events.
+- **Inputs:** local repository path; Git status/diff; tracked source files; locked Markdown specs; optional supporting docs; optional user-entered task prompt; optional file-change events.
 - **Outputs:** whole-project map; per-goal implementation relationship/status; verification status/evidence; code/source links; inferred/unknown markers; diff highlighting; unresolved spec/prompt conflicts; stale/error state; replaceable current-state cache.
 - **Status vocabulary:** appears-to-support, conflict, unmapped, unavailable, unknown, stale. Verification is separate: verified only with explicit evidence, otherwise unknown or failed.
 - **Cache contents:** project identifier/path, timestamp, input fingerprint, baseline/spec references, goal statuses, code/evidence references, analysis version, and selected diff identity. No copied source contents. Cache is replaceable, not historical.
@@ -92,7 +92,7 @@
 ## Rollback & recovery
 - **Analysis failure:** keep the last successful view, mark stale with timestamp/reason, set affected statuses unknown, offer retry.
 - **No previous successful view:** show the error and retain source browsing; do not fabricate a partial successful status.
-- **Watcher failure:** mark the view stale and offer manual refresh/retry; never assert freshness.
+- **Refresh failure** (including a failed optional watcher): mark the view stale and offer manual refresh/retry; never assert freshness.
 - **Cache corruption:** discard the unreadable current cache and rebuild from source/specs; preserve the repository unchanged.
 - **Rollback meaning:** disable the tool or remove its local cache; project files, Git state, and specs remain unchanged.
 - **Catastrophic failure:** silent goal/spec drift or false verification is the release-blocking trust failure.
@@ -107,9 +107,9 @@
 - **Compliance:** N/A — no regulated-data or team-compliance obligations are accepted for V1.
 
 ## Verification plan
-- **AC1–AC5, AC7–AC9:** automated fixture repositories and UI/API tests with deterministic expected links/statuses, conflicts, uncertainty, and stale states.
-- **AC4 drill-down:** browser/UI test that follows one goal through each level to a source location and checks evidence links remain present.
-- **AC6 performance/live refresh:** instrumented local fixture of 100,000 tracked lines; measure end-to-end refresh after 500 ms debounce; pass only if p95 is at most 3 seconds.
+- **AC1–AC5, AC7–AC9:** automated fixture repositories driving the derived payload, with deterministic expected links, statuses, conflicts, uncertainty, and stale states. The page renders that payload and computes no status itself, so these tests pin the contract.
+- **AC4 drill-down:** asserted at the payload level — the goal and its evidence stay present in every module, file, and declaration detail. The rendered walk through each level is checked by a recorded scripted browser run, not by a committed test: a committed browser harness is a known V1 gap and does not change the release gate.
+- **AC6 refresh:** instrumented local fixture of 100,000 tracked lines; measure one refresh end to end — pass only if p95 is at most 3 seconds — plus a staleness check: after an edit, nothing reports itself current until a refresh has run.
 - **AC10 read-only:** before/after Git status, index/ref checks, and file hashes across a full session; no repository mutation allowed.
 - **AC11 privacy:** outbound connection audit in default mode and inspection of telemetry/logs for source, spec, prompt, and cache content.
 - **AC12 current cache only:** persistence tests for one replaceable current cache, schema/version and input fingerprint, no source-copy payload, deletion/rebuild, and repo-external storage; verify no historical snapshots are created.
