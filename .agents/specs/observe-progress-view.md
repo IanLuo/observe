@@ -19,7 +19,8 @@
   - One local Git repository at a time.
   - Whole-project goal/code map, with a user-selected diff highlighted.
   - Drill-down from a goal or the project overview through areas, modules, files, and declarations to exact source locations; every level keeps the goal and its evidence.
-  - Goal checks declared in the locked spec and evaluated locally against code: pass, violated, or unknown, each with evidence.
+  - Goal checks declared in a locked document and evaluated locally against code: pass, violated, or unknown, each with evidence.
+  - Checks declared outside the goal spec are shown as invariants, with their own verdicts, and never count toward goal alignment.
   - Static analysis only; a relationship no check establishes stays unknown.
   - Live refresh of the open view: after file changes, the affected relationships and diff highlights are brought up to date when a refresh is asked for — the Refresh action, or the page regaining attention. Continuous background watching is desirable but optional in V1.
   - Locked Markdown specs are authoritative goal baselines. Other docs and manually provided task prompts are supporting context only.
@@ -47,7 +48,7 @@
 ## Acceptance criteria
 - **AC1 — Goal trace:** Given a fixture repository with a locked spec, when the overview loads, then every goal shows its checks with a verdict and evidence, or an explicit “no check defined” state.
 - **AC2 — Diff alignment:** Given a fixture with a known diff, when the user selects it, then changed files are highlighted and every check whose evidence the diff touched is marked as touched; a check is never reported as passing because a file changed.
-- **AC3 — Verification separate:** Given code with no tests or other verification evidence, when the user inspects its goal, then implementation evidence may be shown but verification remains unknown; code presence alone never means verified.
+- **AC3 — Verification separate:** Given code with no tests or other verification evidence, when the user inspects its goal, then implementation evidence may be shown but verification remains unknown; code presence alone never means verified. Verification evidence is a test declaration that names the check it exercises; it is evidence that the assertion is tested, never a claim that the test passes.
 - **AC4 — Drill-down:** Given a goal with linked code, when the user drills from overview to exact source, then the goal and evidence links remain available at each level.
 - **AC5 — Prompt conflict:** Given a task prompt that contradicts a locked spec, when the comparison runs, then the conflict is shown and the spec remains the baseline.
 - **AC6 — Refresh:** Given an open view and an edited source file, when a refresh is asked for, then the affected area reflects the new state within 3 seconds and the locked baseline is unchanged; and while its data predates the edit, no area of the view presents itself as current. Watching the filesystem is not required for this criterion.
@@ -57,6 +58,7 @@
 - **AC10 — Read-only:** Given a complete analysis session, when it ends, then tracked/untracked repository state and source/spec file hashes are unchanged.
 - **AC11 — Local privacy:** Given the default configuration, when a full analysis session runs, then no source, spec, task prompt, or cache data leaves the machine.
 - **AC12 — Current cache only:** Given analysis completes, when the current result is cached, then it is local and outside the repo, contains only derived status/evidence references and analysis version, includes no source copies, and is replaceable or deletable. No historical snapshots are retained.
+- **AC14 — Invariants:** Given a check declared in a locked design or architecture document, when the overview loads, then it appears with its verdict under invariants, goal alignment availability is unchanged, and no invariant is presented as a goal.
 - **AC13 — Check verdicts:** Given a check declared in a locked spec, when the analysis runs, then it reports pass, violated, or unknown with source evidence, and an unknown verdict names its reason (missing subject, unusable file, unsupported language, no check defined).
 
 ## KPIs & failure signal
@@ -83,14 +85,15 @@
 - **A4 — “Live” means the view follows the repository when refreshed:** the refresh is asked for — the Refresh action, or the page regaining attention — rather than guaranteed by a watcher. A watcher, if one is enabled, must never present stale results as current.
 - **A5 — macOS is the first target:** platform expansion requires a later decision.
 - **A6 — Prompt entry is manual in V1:** no agent integration exists to retrieve prompts automatically; prompt is context only.
-- **A8 — Goals can carry machine-checkable assertions:** a check is written in the locked spec, by a human or by an agent under review. A goal with no check reports unknown · no check defined; a project whose spec carries no checks stays browsable and says so.
+- **A8 — Goals can carry machine-checkable assertions:** a check is written in a locked document — the goal spec, or a design or architecture document whose bullets become invariants — by a human or by an agent under review. A goal with no check reports unknown · no check defined; a project whose documents carry no checks stays browsable and says so.
 - **A7 — The project exists at `~/Documents/apps/observe` and is implemented:** architecture and system design are locked in their own documents. This spec stays the requirements baseline and does not restate them.
 
 ## Data requirements
 - **Inputs:** local repository path; Git status/diff; tracked source files; locked Markdown specs; optional supporting docs; optional user-entered task prompt; check blocks declared in the locked spec; optional file-change events.
-- **Outputs:** whole-project map; per-goal check verdicts with evidence; verification status/evidence; code/source links; which checks the selected diff touched; unknown markers with reasons; diff highlighting; unresolved spec/prompt conflicts; stale/error state; replaceable current-state cache.
-- **Check format:** a fenced `check` block inside a goal bullet, one check per line: `<id>: <subject> <assertion> [<argument>]`. Subject is `symbol <name>`, `module <dir>`, or `file <path>`. Assertion is `exists`, `absent`, `imports <module>`, `not-imports <module>`, or `has-test`. A check belongs to the goal bullet that encloses it, and its id is unique within the spec.
-- **Status vocabulary:** pass, violated, unknown for checks, and an unknown always carries its reason. Baseline unavailable and stale freshness are their own states. Verification is separate: verified only with explicit evidence, otherwise unknown or failed.
+- **Outputs:** whole-project map; per-goal check verdicts with evidence; invariants declared outside the goal spec, with their own verdicts; verification status/evidence; code/source links; which checks the selected diff touched; unknown markers with reasons; diff highlighting; unresolved spec/prompt conflicts; stale/error state; replaceable current-state cache.
+- **Check format:** a fenced `check` block inside a bullet of a locked document — a goal bullet in the spec, an invariant bullet elsewhere — one check per line: `<id>: <subject> <assertion> [<argument>]`. Subject is `symbol <name>`, `module <dir>`, or `file <path>`. Assertion is `exists`, `absent`, `imports <module>`, `not-imports <module>`, or `has-test`. A check belongs to the bullet that encloses it, and its id is unique within its document.
+- **Verification evidence:** a test declaration whose body names a check id as `covers: <id>`. A goal is verified when every check it declares carries such evidence; otherwise verification stays unknown. No repository code runs, so a naming test is evidence of coverage, never of a passing result.
+- **Status vocabulary:** pass, violated, unknown for checks, and an unknown always carries its reason. Baseline unavailable and stale freshness are their own states. Verification is separate: verified only with explicit evidence (a test naming the check), otherwise unknown or failed.
 - **Cache contents:** project identifier/path, timestamp, input fingerprint, baseline/spec references, goal statuses, code/evidence references, analysis version, and selected diff identity. No copied source contents. Cache is replaceable, not historical.
 - **Empty/edge input:** no selected diff means show the project baseline/map without diff highlights; no locked spec means alignment unavailable; zero tracked source files is a browsable empty project with no inferred progress; unsupported language relationships remain unknown.
 - **Retention:** retain only the latest current-state cache outside the repo. On input change, replace it after a successful analysis; keep the prior result in memory as stale only during refresh. No commit/checkpoint history. Cache can be deleted and rebuilt.
@@ -119,6 +122,7 @@
 - **AC10 read-only:** before/after Git status, index/ref checks, and file hashes across a full session; no repository mutation allowed.
 - **AC11 privacy:** outbound connection audit in default mode and inspection of telemetry/logs for source, spec, prompt, and cache content.
 - **AC12 current cache only:** persistence tests for one replaceable current cache, schema/version and input fingerprint, no source-copy payload, deletion/rebuild, and repo-external storage; verify no historical snapshots are created.
+- **AC14 invariants:** a fixture whose architecture document declares a check: the invariant appears with its verdict, goal alignment stays available, and a violated invariant never appears as a goal verdict.
 - **AC13 check verdicts:** fixture repositories carrying checks assert every verdict with its evidence: a passing check, a violation, unknown for a missing subject, unknown for an unusable file, unknown for an unsupported language, and a `not-imports` violation.
 - **Usability KPI:** five manually observed tasks with seeded conflicts/unmapped changes; record time to locate and open evidence; each under two minutes without agent help.
 - **Release gate:** any failure of AC2, AC3, AC5, or AC13 blocks release; these protect correct diff mapping, verification truthfulness, spec authority, and honest verdicts.
