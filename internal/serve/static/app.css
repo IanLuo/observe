@@ -325,3 +325,20 @@ footer {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
+
+/* An invariant reads as one line: the rule text ellipsises, the verdict stays put. */
+.outline-file.invariant {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+}
+.outline-file.invariant .label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}

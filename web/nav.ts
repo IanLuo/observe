@@ -108,12 +108,12 @@ export function renderNav(root: HTMLElement, state: State, opts: NavOptions): vo
       const key = `g:${index}`;
       const item = el("li", {});
       const entry = el("button", {
-        class: "outline-file" + (opts.selected === key ? " on" : ""),
-        text: goal.label.split(" ").slice(0, 4).join(" "),
+        class: "outline-file invariant" + (opts.selected === key ? " on" : ""),
         title: goal.label,
         ariaPressed: opts.selected === key ? "true" : "false",
       });
       entry.type = "button";
+      entry.append(el("span", { class: "label", text: goal.label }));
       entry.append(badge(checkStyle(status)));
       entry.addEventListener("click", () => opts.onSelect(key));
       item.append(entry);
