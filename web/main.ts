@@ -191,6 +191,29 @@ function followUp(): void {
   window.setTimeout(() => void load(), 700);
 }
 
+/**
+ * refreshOnAttention re-reads the state when the reader comes back to the page.
+ *
+ * Spec AC6 promises that a view whose data predates an edit never presents itself as
+ * current; without this the page sat on a stale picture until Refresh was pressed.
+ * It asks the server to analyse again — /api/state only reads what is in memory — and
+ * the wait keeps a burst of window events from firing a request each.
+ */
+const attentionGap = 2000;
+let lastAttention = 0;
+
+function refreshOnAttention(): void {
+  if (document.visibilityState !== "visible") return;
+  if (view.pending || view.state?.freshness === "updating") return;
+  const now = Date.now();
+  if (now - lastAttention < attentionGap) return;
+  lastAttention = now;
+  void mutate("/api/refresh");
+}
+
+window.addEventListener("focus", refreshOnAttention);
+document.addEventListener("visibilitychange", refreshOnAttention);
+
 async function mutate(path: string): Promise<void> {
   view.pending = true;
   render();
