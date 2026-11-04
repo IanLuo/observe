@@ -35,9 +35,9 @@ type Result struct {
 // the V1 language set cannot read; it turns a would-be violation into an honest
 // unknown. The prompt can only add a conflict record; it never moves a verdict
 // (AC5).
-func Analyze(spec SpecDoc, decls []Declaration, structure Structure, changes []Change, languageGap int, prompt string) Result {
+func Analyze(spec SpecDoc, decls []Declaration, structure Structure, changes []Change, coverage Coverage, prompt string) Result {
 	scan := scanSpec(spec.Path, spec.Body)
-	verdicts := evaluate(scan.Checks, decls, structure, languageGap)
+	verdicts := evaluate(scan.Checks, decls, structure, coverage)
 	touched := touchedSubjects(changes)
 
 	byGoal := make(map[string][]model.Check, len(scan.Goals))
@@ -65,7 +65,7 @@ func Analyze(spec SpecDoc, decls []Declaration, structure Structure, changes []C
 
 // evaluate decides every check against the declarations, the module graph, and the
 // import edges.
-func evaluate(checks []rawCheck, decls []Declaration, st Structure, languageGap int) []model.Check {
+func evaluate(checks []rawCheck, decls []Declaration, st Structure, coverage Coverage) []model.Check {
 	modules := make(map[string]Module, len(st.Modules))
 	for _, m := range st.Modules {
 		modules[m.Dir] = m
@@ -83,7 +83,7 @@ func evaluate(checks []rawCheck, decls []Declaration, st Structure, languageGap 
 
 	out := make([]model.Check, len(checks))
 	for i, c := range checks {
-		out[i] = decide(c, modules, symbols, edges, languageGap)
+		out[i] = decide(c, modules, symbols, edges, coverage)
 	}
 	return out
 }
@@ -93,7 +93,7 @@ func evaluate(checks []rawCheck, decls []Declaration, st Structure, languageGap 
 // A subject that cannot be reached is unknown, not violated: "the code does not
 // say this" and "I could not read the code" are different answers, and the third
 // verdict exists to keep them apart.
-func decide(c rawCheck, modules map[string]Module, symbols map[string][]Declaration, edges map[string][]ModuleEdge, languageGap int) model.Check {
+func decide(c rawCheck, modules map[string]Module, symbols map[string][]Declaration, edges map[string][]ModuleEdge, coverage Coverage) model.Check {
 	kind, name, _ := strings.Cut(c.Subject, " ")
 	out := model.Check{
 		ID:        c.ID,
@@ -114,11 +114,16 @@ func decide(c rawCheck, modules map[string]Module, symbols map[string][]Declarat
 		out.Evidence = evidence
 		return out
 	}
-	// unreadable makes a missing subject honest when the project holds code this
-	// analysis cannot parse.
+	// unreadable keeps a missing subject honest: unknown when the unreadable code is
+	// a material share of the project, violated with the caveat named when it is a
+	// stray corner. Claiming one or the other without saying which would be worse
+	// than either.
 	unreadable := func(missing string) model.Check {
-		if languageGap > 0 {
-			return unknown(missing + "; " + plural(languageGap, "source file is", "source files are") + " outside the V1 languages")
+		if coverage.Material() {
+			return unknown(missing + "; " + plural(coverage.Unreadable, "source file is", "source files are") + " outside the V1 languages")
+		}
+		if coverage.Unreadable > 0 {
+			missing += "; " + plural(coverage.Unreadable, "file outside the V1 languages was", "files outside the V1 languages were") + " not read"
 		}
 		return verdict(model.CheckViolated, missing, nil)
 	}
@@ -333,23 +338,41 @@ func isTouched(raw rawCheck, check model.Check, touched touchedSet) bool {
 	return false
 }
 
-// LanguageGap counts source files the V1 language set cannot read, so a missing
-// symbol can be reported as unknown instead of violated. Vendored and generated
-// trees are out of scope, not a gap.
-func LanguageGap(paths []string) int {
-	gap := 0
+// Coverage is how much of the project's code the V1 languages can read.
+type Coverage struct {
+	Readable   int // files in a V1 language
+	Unreadable int // files in a programming language V1 cannot parse
+}
+
+// Material says whether the unreadable code is a large enough share that a missing
+// subject might be hiding in it. A handful of stray files in an otherwise readable
+// project must not turn every missing symbol into unknown: that would make the
+// verdict useless, which is the failure the third value exists to prevent.
+func (c Coverage) Material() bool {
+	return c.Unreadable > 0 && c.Unreadable*4 >= c.Readable
+}
+
+// Readable reports whether anything could be read at all.
+func (c Coverage) ReadableShare() int { return c.Readable }
+
+// Measure counts the code files the V1 language set can and cannot read. Vendored
+// and generated trees are out of scope, not a gap. Schemas and migrations are not
+// code that declares symbols, so they are not counted.
+func Measure(paths []string) Coverage {
+	var c Coverage
 	for _, p := range paths {
 		if OutOfScope(p) {
 			continue
 		}
 		if _, ok := languageFor(p); ok {
+			c.Readable++
 			continue
 		}
 		if sourceExtension[strings.ToLower(path.Ext(p))] {
-			gap++
+			c.Unreadable++
 		}
 	}
-	return gap
+	return c
 }
 
 // sourceExtension lists extensions that hold source in a language V1 does not
@@ -359,5 +382,5 @@ var sourceExtension = map[string]bool{
 	".swift": true, ".c": true, ".h": true, ".cc": true, ".cpp": true, ".hpp": true,
 	".cs": true, ".php": true, ".scala": true, ".ex": true, ".exs": true, ".erl": true,
 	".hs": true, ".ml": true, ".clj": true, ".lua": true, ".dart": true, ".vue": true,
-	".svelte": true, ".sql": true, ".sol": true, ".zig": true, ".nim": true,
+	".svelte": true, ".sol": true, ".zig": true, ".nim": true,
 }

@@ -129,7 +129,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 			declarations,
 			structure,
 			changesOf(changes),
-			analyze.LanguageGap(tracked),
+			analyze.Measure(tracked),
 			o.Prompt,
 		)
 		out.Snapshot.Assessments = result.Assessments

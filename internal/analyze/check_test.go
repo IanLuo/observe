@@ -24,11 +24,11 @@ func checkSpec(checks ...string) []byte {
 }
 
 // analyzeFixture runs one pass over a small project.
-func analyzeFixture(t *testing.T, spec []byte, files []File, changes []Change, languageGap int) Result {
+func analyzeFixture(t *testing.T, spec []byte, files []File, changes []Change, coverage Coverage) Result {
 	t.Helper()
 	structure, _ := StructureOf(files)
 	decls, _ := Declarations(files)
-	return Analyze(SpecDoc{Path: "spec.md", Body: spec}, decls, structure, changes, languageGap, "")
+	return Analyze(SpecDoc{Path: "spec.md", Body: spec}, decls, structure, changes, coverage, "")
 }
 
 // checkNamed finds one verdict by id.
@@ -46,7 +46,7 @@ func checkNamed(t *testing.T, result Result, id string) model.Check {
 }
 
 func TestCheckPassesWhenTheSymbolExists(t *testing.T) {
-	result := analyzeFixture(t, checkSpec("store-exists: symbol A exists"), fixture(), nil, 0)
+	result := analyzeFixture(t, checkSpec("store-exists: symbol A exists"), fixture(), nil, Coverage{})
 
 	check := checkNamed(t, result, "store-exists")
 	if check.Status != model.CheckPass {
@@ -61,7 +61,7 @@ func TestCheckPassesWhenTheSymbolExists(t *testing.T) {
 }
 
 func TestCheckIsViolatedWhenTheSymbolIsGone(t *testing.T) {
-	result := analyzeFixture(t, checkSpec("store-exists: symbol Ledger exists"), fixture(), nil, 0)
+	result := analyzeFixture(t, checkSpec("store-exists: symbol Ledger exists"), fixture(), nil, Coverage{})
 
 	check := checkNamed(t, result, "store-exists")
 	if check.Status != model.CheckViolated {
@@ -75,7 +75,7 @@ func TestCheckIsViolatedWhenTheSymbolIsGone(t *testing.T) {
 // A symbol that is not found in a project holding code V1 cannot read is unknown:
 // the absence is a limit of the analysis, not a fact about the code.
 func TestCheckIsUnknownWhenTheLanguageCannotBeRead(t *testing.T) {
-	result := analyzeFixture(t, checkSpec("store-exists: symbol Ledger exists"), fixture(), nil, 2)
+	result := analyzeFixture(t, checkSpec("store-exists: symbol Ledger exists"), fixture(), nil, Coverage{Readable: 1, Unreadable: 4})
 
 	check := checkNamed(t, result, "store-exists")
 	if check.Status != model.CheckUnknown {
@@ -87,7 +87,7 @@ func TestCheckIsUnknownWhenTheLanguageCannotBeRead(t *testing.T) {
 }
 
 func TestCheckOnAMissingModuleIsUnknown(t *testing.T) {
-	result := analyzeFixture(t, checkSpec("b-no-reader: module internal/nowhere not-imports internal/b"), fixture(), nil, 0)
+	result := analyzeFixture(t, checkSpec("b-no-reader: module internal/nowhere not-imports internal/b"), fixture(), nil, Coverage{})
 
 	check := checkNamed(t, result, "b-no-reader")
 	if check.Status != model.CheckUnknown {
@@ -96,7 +96,7 @@ func TestCheckOnAMissingModuleIsUnknown(t *testing.T) {
 }
 
 func TestNotImportsIsViolatedWithTheImportLine(t *testing.T) {
-	result := analyzeFixture(t, checkSpec("a-no-b: module internal/a not-imports internal/b"), fixture(), nil, 0)
+	result := analyzeFixture(t, checkSpec("a-no-b: module internal/a not-imports internal/b"), fixture(), nil, Coverage{})
 
 	check := checkNamed(t, result, "a-no-b")
 	if check.Status != model.CheckViolated {
@@ -111,7 +111,7 @@ func TestNotImportsIsViolatedWithTheImportLine(t *testing.T) {
 }
 
 func TestImportsIsViolatedWhenNothingResolves(t *testing.T) {
-	result := analyzeFixture(t, checkSpec("a-imports-b: module internal/a imports internal/nowhere"), fixture(), nil, 0)
+	result := analyzeFixture(t, checkSpec("a-imports-b: module internal/a imports internal/nowhere"), fixture(), nil, Coverage{})
 
 	if got := checkNamed(t, result, "a-imports-b").Status; got != model.CheckViolated {
 		t.Fatalf("status = %q, want violated", got)
@@ -122,7 +122,7 @@ func TestHasTestFollowsTheModuleFiles(t *testing.T) {
 	result := analyzeFixture(t, checkSpec(
 		"a-has-test: module internal/a has-test",
 		"b-has-test: module internal/b has-test",
-	), fixture(), nil, 0)
+	), fixture(), nil, Coverage{})
 
 	if got := checkNamed(t, result, "a-has-test").Status; got != model.CheckPass {
 		t.Errorf("internal/a status = %q, want pass", got)
@@ -135,8 +135,8 @@ func TestHasTestFollowsTheModuleFiles(t *testing.T) {
 // A diff marks the checks it touched and never changes a verdict (AC2).
 func TestTouchedMarksWithoutChangingTheVerdict(t *testing.T) {
 	spec := checkSpec("a-imports-b: module internal/a imports internal/b")
-	clean := analyzeFixture(t, spec, fixture(), nil, 0)
-	changed := analyzeFixture(t, spec, fixture(), []Change{{Path: "internal/a/a.go"}}, 0)
+	clean := analyzeFixture(t, spec, fixture(), nil, Coverage{})
+	changed := analyzeFixture(t, spec, fixture(), []Change{{Path: "internal/a/a.go"}}, Coverage{})
 
 	if checkNamed(t, clean, "a-imports-b").Touched {
 		t.Error("a check is touched with no diff")
@@ -152,7 +152,7 @@ func TestTouchedMarksWithoutChangingTheVerdict(t *testing.T) {
 
 // A goal with no check is explicit, not guessed.
 func TestGoalWithoutCheckHasNoVerdict(t *testing.T) {
-	result := analyzeFixture(t, []byte("## Scope in / out\n- One goal, no check.\n"), fixture(), nil, 0)
+	result := analyzeFixture(t, []byte("## Scope in / out\n- One goal, no check.\n"), fixture(), nil, Coverage{})
 
 	if len(result.Assessments) != 1 {
 		t.Fatalf("assessments = %d, want 1", len(result.Assessments))
@@ -173,7 +173,7 @@ func TestUnreadableChecksBecomeDiagnostics(t *testing.T) {
 		"bad-assertion: symbol A mentions",
 		"bad-subject: widget A exists",
 		"passes: symbol A exists",
-	), fixture(), nil, 0)
+	), fixture(), nil, Coverage{})
 
 	if len(result.Diagnostics) != 3 {
 		t.Fatalf("diagnostics = %d, want 3: %+v", len(result.Diagnostics), result.Diagnostics)
@@ -190,7 +190,7 @@ func TestUnreadableChecksBecomeDiagnostics(t *testing.T) {
 
 func TestCheckMustSitInsideAGoal(t *testing.T) {
 	spec := []byte("## Scope in / out\n\n```check\nfloating: symbol Store exists\n```\n")
-	result := analyzeFixture(t, spec, fixture(), nil, 0)
+	result := analyzeFixture(t, spec, fixture(), nil, Coverage{})
 
 	if len(result.Diagnostics) != 1 || !strings.Contains(result.Diagnostics[0].Message, "goal bullet") {
 		t.Fatalf("diagnostics = %+v, want one about the enclosing goal", result.Diagnostics)
@@ -201,19 +201,35 @@ func TestDuplicateCheckIDsAreRefused(t *testing.T) {
 	result := analyzeFixture(t, checkSpec(
 		"same: symbol A exists",
 		"same: symbol Ledger exists",
-	), fixture(), nil, 0)
+	), fixture(), nil, Coverage{})
 
 	if len(result.Diagnostics) != 1 || !strings.Contains(result.Diagnostics[0].Message, "declared twice") {
 		t.Fatalf("diagnostics = %+v, want one about the duplicate id", result.Diagnostics)
 	}
 }
 
-func TestLanguageGapCountsCodeItCannotRead(t *testing.T) {
+func TestMeasureCountsOnlyRealCode(t *testing.T) {
 	paths := []string{
 		"internal/a/a.go", "web/main.ts", "docs/spec.md",
 		"tools/build.py", "vendor/x/lib.py", "node_modules/y/index.js",
+		"packages/db/migrations/0001.sql",
 	}
-	if got := LanguageGap(paths); got != 1 {
-		t.Fatalf("LanguageGap = %d, want 1 (only tools/build.py)", got)
+	if got := Measure(paths); got != (Coverage{Readable: 2, Unreadable: 1}) {
+		t.Fatalf("Measure = %+v, want two readable and one unreadable", got)
+	}
+}
+
+// A stray file must not hide a real violation: the caveat is named, the verdict
+// stays violated.
+func TestSmallUnreadableShareKeepsTheViolation(t *testing.T) {
+	result := analyzeFixture(t, checkSpec("store-exists: symbol Ledger exists"), fixture(), nil,
+		Coverage{Readable: 40, Unreadable: 3})
+
+	check := checkNamed(t, result, "store-exists")
+	if check.Status != model.CheckViolated {
+		t.Fatalf("status = %q, want violated", check.Status)
+	}
+	if !strings.Contains(check.Reason, "not read") {
+		t.Errorf("reason %q does not name the unread code", check.Reason)
 	}
 }
