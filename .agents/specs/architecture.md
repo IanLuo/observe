@@ -15,14 +15,33 @@
 
 ## Layers & ownership
 - **Dependency rule:** dependencies flow inward to `internal/model`; no package imports a higher-level package. `internal/serve` is the composition root.
+  ```check
+  model-is-a-leaf: module internal/model not-imports internal/analyze
+  model-imports-no-serve: module internal/model not-imports internal/serve
+  ```
 - **`cmd/observe` → `internal/serve`:** flags/startup and browser opening only; no domain logic.
 - **`internal/serve` → `internal/repo`, `internal/analyze`, `internal/store`, `internal/watch`, `internal/model`:** HTTP/UI boundary and orchestration; does not invent evidence or compute statuses.
 - **`internal/repo` → `internal/model`:** read-only Git and file access; implements the Repo reader component in system design. Does not parse relationships, serve HTTP, or write.
+  ```check
+  repo-does-not-serve: module internal/repo not-imports internal/serve
+  repo-does-not-parse: module internal/repo not-imports internal/analyze
+  ```
 - **`internal/analyze` → `internal/model`:** deterministic parsing and candidate links; consumes in-memory inputs and emits evidence/provenance. Does not read files, access SQLite, or serve HTTP.
+  ```check
+  analyze-does-not-serve: module internal/analyze not-imports internal/serve
+  analyze-does-not-store: module internal/analyze not-imports internal/store
+  ```
 - **`internal/store` → `internal/model`:** SQLite schema/migrations and disposable latest-result cache. No commit/checkpoint history, source copies, or repo writes.
+  ```check
+  store-does-not-serve: module internal/store not-imports internal/serve
+  no-history-snapshot: symbol Checkpoint absent
+  ```
 - **`internal/watch` → `internal/model`:** file events, debounce, generation IDs. Does not parse or persist.
 - **`internal/model`:** shared types, status vocabulary, and typed errors. Imports no internal package.
 - **`web/`:** TypeScript/SVG client compiled to static assets and embedded by `internal/serve`; uses the HTTP contract, does not import Go internals or determine status.
+  ```check
+  ui-is-embedded: file internal/serve/static/app.js exists
+  ```
 - **Boundary rule:** each layer returns only evidence/status it can justify. Missing or unsupported evidence is explicit `unknown`/typed error, not empty success.
 
 ## Repository tree
