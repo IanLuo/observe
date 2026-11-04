@@ -153,11 +153,18 @@ export function renderDetail(root: HTMLElement, state: State, selected: string |
     return;
   }
 
-  root.append(el("div", { class: "crumbs", text: [goal.spec_path, ...goal.heading].join(" › ") }));
+  root.append(el("div", { class: "crumbs", text: [goal.invariant ? "Invariant" : goal.spec_path, ...goal.heading].join(" › ") }));
   root.append(el("h2", { text: goal.label }));
   root.append(el("div", { class: "badges" }, [badge(checkStyle(goalStatus(goal)))]));
 
-  root.append(el("p", { class: "meta", text: "Goal read from the locked spec; the verdicts come from the checks it declares." }));
+  root.append(
+    el("p", {
+      class: "meta",
+      text: goal.invariant
+        ? "Invariant read from a locked document outside the goal spec; it never counts as a goal."
+        : "Goal read from the locked spec; the verdicts come from the checks it declares.",
+    }),
+  );
 
   const checks = checksOf(goal);
   root.append(el("h2", { class: "sub", text: "Checks" }));
@@ -176,6 +183,15 @@ export function renderDetail(root: HTMLElement, state: State, selected: string |
         el("div", { class: "meta", text: facts.join(" · ") }),
       ]);
       if (check.reason) row.append(el("p", { class: "meta", text: check.reason }));
+      const tests = check.verification_evidence ?? [];
+      if (check.verification === "verified" && tests.length > 0) {
+        row.append(
+          el("p", {
+            class: "meta",
+            text: `exercised by ${tests[0].path}:${tests[0].line_start}${tests.length > 1 ? ` and ${tests.length - 1} more` : ""} — a naming test, not a passing result`,
+          }),
+        );
+      }
       const evidence = check.evidence ?? [];
       if (evidence.length > 0) {
         row.append(evidenceList(evidence));

@@ -4,7 +4,7 @@
 // that, the changed files of the selected diff. Every entry is a way into the
 // picture on the right, so the two panels never show the same thing twice.
 
-import { clear, el } from "./dom";
+import { badge, checkStyle, clear, el } from "./dom";
 import { fileKey, moduleKey } from "./project";
 import { State } from "./types";
 
@@ -88,6 +88,39 @@ export function renderNav(root: HTMLElement, state: State, opts: NavOptions): vo
     list.append(row);
   }
   root.append(list);
+
+  // Invariants are checks declared outside the goal spec: layer rules, boundary
+  // rules. They are not goals, so they get their own section rather than a place in
+  // the goal map (AC14).
+  const invariants = (state.goals ?? [])
+    .map((goal, index) => ({ goal, index }))
+    .filter((entry) => entry.goal.invariant);
+  if (invariants.length > 0) {
+    root.append(
+      el("div", { class: "section-head" }, [
+        el("h2", { text: "Invariants" }),
+        el("span", { class: "meta", text: `${invariants.length}` }),
+      ]),
+    );
+    const rows = el("ul", { class: "outline invariants" });
+    for (const { goal, index } of invariants) {
+      const status = (goal.checks ?? [])[0]?.status ?? "unknown";
+      const key = `g:${index}`;
+      const item = el("li", {});
+      const entry = el("button", {
+        class: "outline-file" + (opts.selected === key ? " on" : ""),
+        text: goal.label.split(" ").slice(0, 4).join(" "),
+        title: goal.label,
+        ariaPressed: opts.selected === key ? "true" : "false",
+      });
+      entry.type = "button";
+      entry.append(badge(checkStyle(status)));
+      entry.addEventListener("click", () => opts.onSelect(key));
+      item.append(entry);
+      rows.append(item);
+    }
+    root.append(rows);
+  }
 
   // Changed source files are already in the outline above, marked as changed.
   // Only changes outside the source tree appear here, so no file is listed twice.

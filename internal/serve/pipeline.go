@@ -102,10 +102,19 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	// A repository without a usable baseline has no goals to assess, but it still
 	// gets a snapshot: browsing stays available and alignment stays unavailable
 	// (AC7). A prompt can never become the baseline.
+	// Every locked document may declare checks. The goal spec supplies the goals; the
+	// others supply invariants, which are shown with their own verdicts and never
+	// counted as goals (AC14).
+	docBodies := make([]analyze.SpecDoc, 0, len(specs))
+	for _, spec := range specs {
+		docBodies = append(docBodies, analyze.SpecDoc{Path: spec.Path, Body: spec.Body})
+	}
+	baselinePath := ""
 	if baseline.State == model.BaselineAvailable {
-		specPath := baseline.SpecPaths[0]
-		body := specBody(specs, specPath)
+		baselinePath = baseline.SpecPaths[0]
+	}
 
+	if baseline.State == model.BaselineAvailable {
 		if handle != nil {
 			loaded, err := handle.Load(fingerprint)
 			switch {
@@ -123,20 +132,22 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 				out.Snapshot.Diagnostics = append(out.Snapshot.Diagnostics, loaded.Diagnostics...)
 			}
 		}
+	}
 
-		result := analyze.Analyze(
-			analyze.SpecDoc{Path: specPath, Body: body},
-			declarations,
-			structure,
-			changesOf(changes),
-			analyze.Measure(tracked),
-			o.Prompt,
-		)
-		out.Snapshot.Assessments = result.Assessments
-		out.Snapshot.Diagnostics = append(out.Snapshot.Diagnostics, result.Diagnostics...)
-		if len(result.PromptConflicts) > 0 {
-			out.Conflicts = result.PromptConflicts
-		}
+	result := analyze.Analyze(analyze.Input{
+		Baseline:  baselinePath,
+		Docs:      docBodies,
+		Sources:   sources,
+		Decls:     declarations,
+		Structure: structure,
+		Changes:   changesOf(changes),
+		Coverage:  analyze.Measure(tracked),
+		Prompt:    o.Prompt,
+	})
+	out.Snapshot.Assessments = result.Assessments
+	out.Snapshot.Diagnostics = append(out.Snapshot.Diagnostics, result.Diagnostics...)
+	if len(result.PromptConflicts) > 0 {
+		out.Conflicts = result.PromptConflicts
 	}
 
 	out.Snapshot.CreatedAt = time.Now().UTC()

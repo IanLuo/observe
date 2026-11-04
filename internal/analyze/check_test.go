@@ -26,9 +26,25 @@ func checkSpec(checks ...string) []byte {
 // analyzeFixture runs one pass over a small project.
 func analyzeFixture(t *testing.T, spec []byte, files []File, changes []Change, coverage Coverage) Result {
 	t.Helper()
+	return analyzeDocs(t, []SpecDoc{{Path: "spec.md", Body: spec}}, "spec.md", files, changes, coverage, "")
+}
+
+// analyzeDocs runs one pass over several locked documents. The baseline is the one
+// whose bullets become goals; the others contribute invariants.
+func analyzeDocs(t *testing.T, docs []SpecDoc, baseline string, files []File, changes []Change, coverage Coverage, prompt string) Result {
+	t.Helper()
 	structure, _ := StructureOf(files)
 	decls, _ := Declarations(files)
-	return Analyze(SpecDoc{Path: "spec.md", Body: spec}, decls, structure, changes, coverage, "")
+	return Analyze(Input{
+		Baseline:  baseline,
+		Docs:      docs,
+		Sources:   files,
+		Decls:     decls,
+		Structure: structure,
+		Changes:   changes,
+		Coverage:  coverage,
+		Prompt:    prompt,
+	})
 }
 
 // checkNamed finds one verdict by id.
@@ -273,5 +289,118 @@ func TestAbsencePassesRecordWhatWasInspected(t *testing.T) {
 		if len(check.Evidence) != 0 {
 			t.Errorf("%s carries evidence for an absence: %+v", id, check.Evidence)
 		}
+	}
+}
+
+// A bullet in a locked document outside the goal spec is an invariant: it carries
+// checks and verdicts, and it is never counted as a goal (AC14).
+func TestChecksOutsideTheSpecBecomeInvariants(t *testing.T) {
+	architecture := []byte(`# Architecture
+## Layers
+- Domain may not import adapters.
+
+  ` + "```check" + `
+  domain-pure: module internal/a not-imports internal/b
+  ` + "```" + `
+- A bullet with no check stays prose.
+`)
+	result := analyzeDocs(t,
+		[]SpecDoc{
+			{Path: "spec.md", Body: checkSpec("a-imports-b: module internal/a imports internal/b")},
+			{Path: "architecture.md", Body: architecture},
+		},
+		"spec.md", fixture(), nil, Coverage{}, "")
+
+	var invariants, goals int
+	for _, a := range result.Assessments {
+		if a.Invariant {
+			invariants++
+		} else {
+			goals++
+		}
+	}
+	if goals != 2 {
+		t.Errorf("goals = %d, want the spec's 2 bullets", goals)
+	}
+	if invariants != 1 {
+		t.Fatalf("invariants = %d, want 1: %+v", invariants, result.Assessments)
+	}
+	for _, a := range result.Assessments {
+		if a.Invariant && len(a.Checks) != 1 {
+			t.Errorf("invariant lost its check: %+v", a)
+		}
+		for _, c := range a.Checks {
+			if !a.Invariant && c.ID == "domain-pure" {
+				t.Error("an invariant check was attached to a goal")
+			}
+		}
+	}
+}
+
+// A document that declares no check contributes nothing: its bullets are prose.
+func TestDocumentWithoutChecksAddsNoInvariants(t *testing.T) {
+	doc := []byte("# Architecture\n## Layers\n- Domain may not import adapters.\n")
+	result := analyzeDocs(t,
+		[]SpecDoc{{Path: "spec.md", Body: checkSpec("a-imports-b: module internal/a imports internal/b")}, {Path: "architecture.md", Body: doc}},
+		"spec.md", fixture(), nil, Coverage{}, "")
+
+	for _, a := range result.Assessments {
+		if a.Invariant {
+			t.Fatalf("prose became an invariant: %+v", a)
+		}
+	}
+}
+
+// A test that names a check is evidence that the assertion is exercised. It never
+// makes the assertion pass, and one covered check does not verify a goal (AC3).
+func TestCoversDirectiveIsVerificationEvidenceOnly(t *testing.T) {
+	covered := append(fixture(), File{
+		Path: "internal/a/covers_test.go",
+		Body: []byte("package a\n\n// covers: a-imports-b\nfunc TestLayer(t *testing.T) {}\n"),
+	})
+	spec := checkSpec("a-imports-b: module internal/a imports internal/b")
+
+	result := analyzeDocs(t, []SpecDoc{{Path: "spec.md", Body: spec}}, "spec.md", covered, nil, Coverage{}, "")
+	check := checkNamed(t, result, "a-imports-b")
+	if check.Verification != model.VerificationVerified {
+		t.Fatalf("verification = %q, want verified", check.Verification)
+	}
+	if len(check.VerificationEvidence) != 1 || check.VerificationEvidence[0].Path != "internal/a/covers_test.go" {
+		t.Fatalf("evidence = %+v, want the test that names it", check.VerificationEvidence)
+	}
+	if check.VerificationEvidence[0].LineStart != 3 {
+		t.Errorf("evidence line = %d, want 3", check.VerificationEvidence[0].LineStart)
+	}
+	if check.Status != model.CheckPass {
+		t.Errorf("status = %q; coverage must not move a verdict", check.Status)
+	}
+
+	// One of two checks covered leaves the goal unverified.
+	half := checkSpec("a-imports-b: module internal/a imports internal/b", "b-uncovered: symbol B exists")
+	partial := analyzeDocs(t, []SpecDoc{{Path: "spec.md", Body: half}}, "spec.md", covered, nil, Coverage{}, "")
+	for _, a := range partial.Assessments {
+		if len(a.Checks) > 0 && a.Verification != model.VerificationUnknown {
+			t.Fatalf("verification = %q with an uncovered check: %+v", a.Verification, a.Checks)
+		}
+	}
+
+	// No directive, no evidence.
+	plain := analyzeDocs(t, []SpecDoc{{Path: "spec.md", Body: spec}}, "spec.md", fixture(), nil, Coverage{}, "")
+	if got := checkNamed(t, plain, "a-imports-b").Verification; got != model.VerificationUnknown {
+		t.Errorf("verification without a covers directive = %q", got)
+	}
+}
+
+// A test file is the only place the directive counts: source comments do not verify.
+func TestCoversInSourceFilesIsIgnored(t *testing.T) {
+	files := append(fixture(), File{
+		Path: "internal/a/a.go",
+		Body: []byte("package a\n\n// covers: a-imports-b\nfunc A2() {}\n"),
+	})
+	result := analyzeDocs(t, []SpecDoc{{Path: "spec.md", Body: checkSpec("a-imports-b: module internal/a imports internal/b")}},
+		"spec.md", files, nil, Coverage{}, "")
+
+	if got := checkNamed(t, result, "a-imports-b").Verification; got != model.VerificationUnknown {
+		t.Fatalf("verification = %q; only a test file may claim coverage", got)
 	}
 }

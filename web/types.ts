@@ -27,6 +27,8 @@ export interface Check {
   evidence: Ref[];
   inspected: number;
   touched: boolean;
+  verification: Verification;
+  verification_evidence: Ref[] | null;
   spec_path: string;
   line: number;
 }
@@ -36,6 +38,7 @@ export interface Goal {
   heading: string[];
   label: string;
   text_hash: string;
+  invariant: boolean;
   checks: Check[] | null;
   verification: Verification;
   verification_evidence: Ref[] | null;

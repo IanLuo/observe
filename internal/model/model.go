@@ -119,15 +119,23 @@ type Check struct {
 	// Inspected is what a verdict rests on when there is nothing to point at: a
 	// passing "absent" or "not-imports" check inspects a set and finds nothing.
 	Inspected int
-	Touched   bool
-	SpecPath  string
-	Line      int // where the check is declared, 1-based
+	// Verification is evidence that a test exercises this check. It is a separate
+	// axis: a verified check may still be violated, and a test that names a check
+	// proves coverage, never a passing result (AC3).
+	Verification         Verification
+	VerificationEvidence []EvidenceRef
+	Touched              bool
+	SpecPath             string
+	Line                 int // where the check is declared, 1-based
 }
 
 // GoalAssessment is the per-goal result: the checks the spec declares for it, on
 // one axis, and a verification on another.
 type GoalAssessment struct {
-	Locator              GoalLocator
+	Locator GoalLocator
+	// Invariant marks a bullet from a locked document that is not the goal spec:
+	// it carries checks, and it is never counted as a goal (AC14).
+	Invariant            bool
 	Checks               []Check
 	Verification         Verification
 	VerificationEvidence []EvidenceRef

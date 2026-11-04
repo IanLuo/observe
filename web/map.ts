@@ -149,7 +149,8 @@ export function layout(state: State, expanded: Set<string>, showDiff: boolean): 
   const boxes: Box[] = [];
   const edges: { from: Box; to: Box }[] = [];
   const areas = areasOf(state);
-  const goals = state.goals ?? [];
+  // An invariant is not a goal: it has no place in the goal map (AC14).
+  const goals = (state.goals ?? []).map((goal, index) => ({ goal, index })).filter((entry) => !entry.goal.invariant);
 
   // Areas first: they own the vertical space, and each goal is placed beside its
   // own block afterwards.
@@ -194,7 +195,7 @@ export function layout(state: State, expanded: Set<string>, showDiff: boolean): 
   // Goals: beside their block of areas, or on the next free line when unlinked.
   let free = 0;
   let previousGoal: Box | null = null;
-  goals.forEach((goal, index) => {
+  goals.forEach(({ goal, index }) => {
     const style = checkStyle(goalStatus(goal));
     const checks = checksOf(goal);
     const dirs = goalAreas(goal).map((area) => area.dir);

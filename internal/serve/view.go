@@ -120,6 +120,7 @@ type Goal struct {
 	Heading              []string `json:"heading"`
 	Label                string   `json:"label"`
 	TextHash             string   `json:"text_hash"`
+	Invariant            bool     `json:"invariant"`
 	Checks               []Check  `json:"checks"`
 	Verification         string   `json:"verification"`
 	VerificationEvidence []Ref    `json:"verification_evidence"`
@@ -128,16 +129,18 @@ type Goal struct {
 
 // Check is one declared assertion and its verdict.
 type Check struct {
-	ID        string `json:"id"`
-	Subject   string `json:"subject"`
-	Assertion string `json:"assertion"`
-	Status    string `json:"status"`
-	Reason    string `json:"reason,omitempty"`
-	Evidence  []Ref  `json:"evidence"`
-	Inspected int    `json:"inspected"`
-	Touched   bool   `json:"touched"`
-	SpecPath  string `json:"spec_path"`
-	Line      int    `json:"line"`
+	ID                   string `json:"id"`
+	Subject              string `json:"subject"`
+	Assertion            string `json:"assertion"`
+	Status               string `json:"status"`
+	Reason               string `json:"reason,omitempty"`
+	Evidence             []Ref  `json:"evidence"`
+	Inspected            int    `json:"inspected"`
+	Touched              bool   `json:"touched"`
+	Verification         string `json:"verification"`
+	VerificationEvidence []Ref  `json:"verification_evidence"`
+	SpecPath             string `json:"spec_path"`
+	Line                 int    `json:"line"`
 }
 
 // Ref is one evidence reference: a repository path, a symbol, and a line range.
@@ -251,20 +254,23 @@ func goals(assessments []model.GoalAssessment, freshness string) []Goal {
 		checks := make([]Check, len(a.Checks))
 		for j, c := range a.Checks {
 			checks[j] = Check{
-				ID:        c.ID,
-				Subject:   c.Subject,
-				Assertion: c.Assertion,
-				Status:    string(c.Status),
-				Reason:    c.Reason,
-				Evidence:  refs(c.Evidence),
-				Inspected: c.Inspected,
-				Touched:   c.Touched,
-				SpecPath:  c.SpecPath,
-				Line:      c.Line,
+				ID:                   c.ID,
+				Subject:              c.Subject,
+				Assertion:            c.Assertion,
+				Status:               string(c.Status),
+				Reason:               c.Reason,
+				Evidence:             refs(c.Evidence),
+				Inspected:            c.Inspected,
+				Touched:              c.Touched,
+				Verification:         string(c.Verification),
+				VerificationEvidence: refs(c.VerificationEvidence),
+				SpecPath:             c.SpecPath,
+				Line:                 c.Line,
 			}
 			if stale {
 				checks[j].Status = string(model.CheckUnknown)
 				checks[j].Reason = "the view is stale: the result predates the current inputs"
+				checks[j].Verification = string(model.VerificationUnknown)
 			}
 		}
 		out[i] = Goal{
@@ -272,6 +278,7 @@ func goals(assessments []model.GoalAssessment, freshness string) []Goal {
 			Heading:              append([]string{}, a.Locator.HeadingChain...),
 			Label:                a.Locator.Label,
 			TextHash:             a.Locator.TextHash,
+			Invariant:            a.Invariant,
 			Checks:               checks,
 			Verification:         string(a.Verification),
 			VerificationEvidence: refs(a.VerificationEvidence),

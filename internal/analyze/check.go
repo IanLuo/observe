@@ -2,6 +2,7 @@ package analyze
 
 import (
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -26,41 +27,157 @@ type Result struct {
 	Diagnostics     []model.Diagnostic
 }
 
-// Analyze evaluates the checks a locked spec declares and pairs them with the
-// goals that own them.
+// Input is everything one analysis pass needs.
+type Input struct {
+	Baseline string    // path of the locked spec that holds the goals; empty when none
+	Docs     []SpecDoc // every locked document that may declare checks
+	Sources  []File    // source files, read for `covers:` evidence in tests
+	Decls    []Declaration
+	Structure
+	Changes  []Change
+	Coverage Coverage
+	Prompt   string
+}
+
+// Analyze evaluates every check the locked documents declare and pairs each with the
+// bullet that owns it.
 //
 // This is the only place a status is produced, and it produces three: pass,
-// violated, and unknown. Verification stays a separate axis and is always unknown
-// here: no static pass makes code verified (AC3). languageGap counts source files
-// the V1 language set cannot read; it turns a would-be violation into an honest
-// unknown. The prompt can only add a conflict record; it never moves a verdict
+// violated, and unknown. A bullet in the goal spec is a goal; a bullet elsewhere is
+// an invariant and is never counted as a goal (AC14). Verification is a separate
+// axis: a test that names a check marks the assertion as exercised, never as
+// passing (AC3). The prompt can only add a conflict record; it never moves a verdict
 // (AC5).
-func Analyze(spec SpecDoc, decls []Declaration, structure Structure, changes []Change, coverage Coverage, prompt string) Result {
-	scan := scanSpec(spec.Path, spec.Body)
-	verdicts := evaluate(scan.Checks, decls, structure, coverage)
-	touched := touchedSubjects(changes)
+func Analyze(in Input) Result {
+	covers := coverageOf(in.Sources)
 
-	byGoal := make(map[string][]model.Check, len(scan.Goals))
-	for i, raw := range scan.Checks {
-		check := verdicts[i]
-		check.Touched = isTouched(raw, check, touched)
-		byGoal[raw.GoalHash] = append(byGoal[raw.GoalHash], check)
-	}
+	var (
+		goals       []model.GoalLocator
+		assessments []model.GoalAssessment
+		diags       []model.Diagnostic
+	)
 
-	assessments := make([]model.GoalAssessment, len(scan.Goals))
-	for i, goal := range scan.Goals {
-		assessments[i] = model.GoalAssessment{
-			Locator:      goal,
-			Checks:       byGoal[goal.TextHash],
-			Verification: model.VerificationUnknown,
+	for _, doc := range in.Docs {
+		scan := scanSpec(doc.Path, doc.Body)
+		diags = append(diags, scan.Diags...)
+		if len(scan.Checks) == 0 {
+			// A document that declares no check contributes no invariants: its bullets
+			// are prose, and listing them would bury the ones that carry a verdict.
+			if doc.Path == in.Baseline {
+				goals = append(goals, scan.Goals...)
+				assessments = append(assessments, blank(scan.Goals)...)
+			}
+			continue
+		}
+
+		verdicts := evaluate(scan.Checks, in.Decls, in.Structure, in.Coverage)
+		touched := touchedSubjects(in.Changes)
+
+		byGoal := make(map[string][]model.Check, len(scan.Goals))
+		for i, raw := range scan.Checks {
+			check := verdicts[i]
+			check.Touched = isTouched(raw, check, touched)
+			if evidence, ok := covers[raw.ID]; ok {
+				check.Verification = model.VerificationVerified
+				check.VerificationEvidence = evidence
+			}
+			byGoal[raw.GoalHash] = append(byGoal[raw.GoalHash], check)
+		}
+
+		invariant := doc.Path != in.Baseline
+		for _, goal := range scan.Goals {
+			checks := byGoal[goal.TextHash]
+			if invariant && len(checks) == 0 {
+				continue // an architecture bullet without a check is prose, not an invariant
+			}
+			if !invariant {
+				goals = append(goals, goal)
+			}
+			assessments = append(assessments, model.GoalAssessment{
+				Locator:              goal,
+				Invariant:            invariant,
+				Checks:               checks,
+				Verification:         verified(checks),
+				VerificationEvidence: verificationEvidence(checks),
+			})
 		}
 	}
 
 	return Result{
 		Assessments:     assessments,
-		PromptConflicts: PromptConflicts(scan.Goals, prompt),
-		Diagnostics:     scan.Diags,
+		PromptConflicts: PromptConflicts(goals, in.Prompt),
+		Diagnostics:     diags,
 	}
+}
+
+// blank is a goal with no check declared: explicit, not a guess.
+func blank(goals []model.GoalLocator) []model.GoalAssessment {
+	out := make([]model.GoalAssessment, len(goals))
+	for i, goal := range goals {
+		out[i] = model.GoalAssessment{Locator: goal, Verification: model.VerificationUnknown}
+	}
+	return out
+}
+
+// verified is per goal: every check it declares must be exercised by a test.
+// Anything less is unknown — one tested assertion does not verify a goal.
+func verified(checks []model.Check) model.Verification {
+	if len(checks) == 0 {
+		return model.VerificationUnknown
+	}
+	for _, c := range checks {
+		if c.Verification != model.VerificationVerified {
+			return model.VerificationUnknown
+		}
+	}
+	return model.VerificationVerified
+}
+
+func verificationEvidence(checks []model.Check) []model.EvidenceRef {
+	var refs []model.EvidenceRef
+	seen := map[string]bool{}
+	for _, c := range checks {
+		for _, ref := range c.VerificationEvidence {
+			key := ref.Path + ":" + string(rune(ref.LineStart))
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			refs = append(refs, ref)
+		}
+	}
+	return refs
+}
+
+// coversPattern matches the directive a test writes to claim a check.
+var coversPattern = regexp.MustCompile(`\bcovers:\s*([a-z0-9][a-z0-9-]*)`)
+
+// coverageOf finds the test declarations that name a check.
+//
+// It reads test files only, and only for the directive: a test that happens to
+// mention a word is not evidence. Naming a check says the assertion is exercised;
+// nothing here runs the test, so it never says the assertion holds.
+func coverageOf(sources []File) map[string][]model.EvidenceRef {
+	out := map[string][]model.EvidenceRef{}
+	for _, f := range sources {
+		if !isTestPath(f.Path) {
+			continue
+		}
+		for i, line := range strings.Split(string(f.Body), "\n") {
+			for _, m := range coversPattern.FindAllStringSubmatch(line, -1) {
+				out[m[1]] = append(out[m[1]], model.EvidenceRef{
+					Path:       f.Path,
+					LineStart:  i + 1,
+					LineEnd:    i + 1,
+					Kind:       model.EvidenceTest,
+					Provenance: model.ProvenanceParserRule,
+					Confidence: 1,
+					Verifier:   "covers",
+				})
+			}
+		}
+	}
+	return out
 }
 
 // evaluate decides every check against the declarations, the module graph, and the
@@ -90,6 +207,8 @@ func evaluate(checks []rawCheck, decls []Declaration, st Structure, coverage Cov
 	out := make([]model.Check, len(checks))
 	for i, c := range checks {
 		out[i] = decide(c, modules, symbols, edges, files, coverage)
+		// Verification starts unknown: no verdict and no coverage by default (AC3).
+		out[i].Verification = model.VerificationUnknown
 	}
 	return out
 }
