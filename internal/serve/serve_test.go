@@ -21,7 +21,15 @@ const specDoc = `<!-- specs:locked:abc1234 2026-01-01 type=spec -->
 # Spec
 ## Scope
 - The reader exposes ` + "`Open`" + ` for a repository.
+
+  ` + "```check" + `
+  open-exists: symbol Open exists
+  ` + "```" + `
 - The cache lives in ` + "`internal/store`" + `.
+
+  ` + "```check" + `
+  store-exists: module internal/store exists
+  ` + "```" + `
 `
 
 // fixtureRepo builds a temporary repository: a locked spec, one Go file declaring
@@ -124,18 +132,22 @@ func TestStateCarriesTheWholeDrillDown(t *testing.T) {
 	if goal.SpecPath != ".agents/specs/spec.md" || len(goal.Heading) == 0 || goal.Label == "" {
 		t.Fatalf("goal locator incomplete: %+v", goal)
 	}
-	if goal.Relation != "appears-to-support" {
-		t.Fatalf("relation = %q, want appears-to-support", goal.Relation)
+	if len(goal.Checks) != 1 {
+		t.Fatalf("checks = %+v, want the declared one", goal.Checks)
 	}
-	if len(goal.Evidence) == 0 {
-		t.Fatal("no evidence on the classified goal")
+	check := goal.Checks[0]
+	if check.Status != "pass" {
+		t.Fatalf("verdict = %q (%s), want pass", check.Status, check.Reason)
 	}
-	ref := goal.Evidence[0]
+	if !check.Touched {
+		t.Error("the diff changed the file the verdict rests on; it must be marked touched")
+	}
+	if len(check.Evidence) == 0 {
+		t.Fatal("no evidence on the passing check")
+	}
+	ref := check.Evidence[0]
 	if ref.Path != "internal/repo/repo.go" || ref.Symbol != "Open" || ref.LineStart == 0 {
 		t.Fatalf("evidence cannot be drilled to a line: %+v", ref)
-	}
-	if !goal.Inferred {
-		t.Error("a diff-matched relation must stay marked inferred")
 	}
 	if goal.Verification != "unknown" {
 		t.Errorf("verification = %q: a diff never verifies", goal.Verification)
@@ -202,8 +214,11 @@ func TestFailedRefreshKeepsTheLastViewStaleWithReason(t *testing.T) {
 			Freshness:  model.FreshnessCurrent,
 			Assessments: []model.GoalAssessment{{
 				Locator:      model.GoalLocator{SpecPath: "spec.md", Label: "a goal", HeadingChain: []string{"Scope"}},
-				Relation:     model.RelationAppearsToSupport,
 				Verification: model.VerificationUnknown,
+				Checks: []model.Check{{
+					ID: "open-exists", Subject: "symbol Open", Assertion: "exists",
+					Status: model.CheckPass, SpecPath: "spec.md", Line: 7,
+				}},
 			}},
 		},
 		Baseline: model.SpecBaseline{State: model.BaselineAvailable, SpecPaths: []string{"spec.md"}},
@@ -241,8 +256,14 @@ func TestFailedRefreshKeepsTheLastViewStaleWithReason(t *testing.T) {
 	if len(got.Goals) != 1 {
 		t.Fatalf("the last successful view was lost: %+v", got.Goals)
 	}
-	if got.Goals[0].Relation != "stale" {
-		t.Fatalf("relation = %q: a stale result must not present its old status", got.Goals[0].Relation)
+	if len(got.Goals[0].Checks) != 1 {
+		t.Fatalf("the last successful view lost its check: %+v", got.Goals[0])
+	}
+	if got.Goals[0].Checks[0].Status != "unknown" {
+		t.Fatalf("verdict = %q: a stale result must not present its old verdict", got.Goals[0].Checks[0].Status)
+	}
+	if !strings.Contains(got.Goals[0].Checks[0].Reason, "stale") {
+		t.Errorf("reason = %q, want the staleness named", got.Goals[0].Checks[0].Reason)
 	}
 	if got.Goals[0].Verification != "unknown" {
 		t.Errorf("stale verification = %q", got.Goals[0].Verification)
@@ -409,8 +430,8 @@ func TestPipelineReusesThenInvalidatesTheCache(t *testing.T) {
 	if got.Cache.State != "saved" {
 		t.Fatalf("changed inputs did not recompute: %q", got.Cache.State)
 	}
-	if got.Goals[0].Relation != "appears-to-support" {
-		t.Fatalf("relation after the edit = %q", got.Goals[0].Relation)
+	if got.Goals[0].Checks[0].Status != "pass" {
+		t.Fatalf("verdict after the edit = %q", got.Goals[0].Checks[0].Status)
 	}
 }
 

@@ -15,17 +15,16 @@ import (
 	"time"
 )
 
-// Relation is how code relates to a goal. An unmapped change is never rendered
-// as aligned, and no value may be upgraded during presentation.
-type Relation string
+// CheckStatus is the verdict of one goal check. Pass and violated come from an
+// assertion evaluated against the repository; unknown means the assertion could
+// not be decided, and it always carries a reason. No verdict is ever upgraded
+// during presentation.
+type CheckStatus string
 
 const (
-	RelationAppearsToSupport Relation = "appears-to-support"
-	RelationConflict         Relation = "conflict"
-	RelationUnmapped         Relation = "unmapped"
-	RelationUnavailable      Relation = "unavailable"
-	RelationUnknown          Relation = "unknown"
-	RelationStale            Relation = "stale"
+	CheckPass     CheckStatus = "pass"
+	CheckViolated CheckStatus = "violated"
+	CheckUnknown  CheckStatus = "unknown"
 )
 
 // Verification is a separate axis from Relation. Code presence alone never
@@ -107,13 +106,26 @@ type Diagnostic struct {
 	Message string
 }
 
-// GoalAssessment is the per-goal result: a relation on one axis and a
-// verification on another.
+// Check is one assertion declared in a locked spec and evaluated against the
+// repository. Touched says the selected diff changed a file the check's evidence
+// depends on; it never makes a check pass (AC2).
+type Check struct {
+	ID        string
+	Subject   string // "symbol Store", "module internal/analyze", "file web/main.ts"
+	Assertion string // "exists", "absent", "imports internal/repo", "has-test"
+	Status    CheckStatus
+	Reason    string // why the verdict is unknown; empty for pass and violated
+	Evidence  []EvidenceRef
+	Touched   bool
+	SpecPath  string
+	Line      int // where the check is declared, 1-based
+}
+
+// GoalAssessment is the per-goal result: the checks the spec declares for it, on
+// one axis, and a verification on another.
 type GoalAssessment struct {
 	Locator              GoalLocator
-	Relation             Relation
-	Inferred             bool
-	Evidence             []EvidenceRef
+	Checks               []Check
 	Verification         Verification
 	VerificationEvidence []EvidenceRef
 	Diagnostics          []Diagnostic

@@ -4,14 +4,14 @@
 
 import {
   badge,
+  checkStyle,
   clear,
   el,
   locationText,
-  relationStyle,
   verificationStyle,
   type StatusStyle,
 } from "./dom";
-import { dirOf, goalAreas } from "./map";
+import { checksOf, dirOf, evidenceOf, goalAreas, goalStatus } from "./map";
 import { DiffFile, Goal, Ref, State } from "./types";
 
 export interface PanelHandlers {
@@ -155,11 +155,32 @@ export function renderDetail(root: HTMLElement, state: State, selected: string |
 
   root.append(el("div", { class: "crumbs", text: [goal.spec_path, ...goal.heading].join(" › ") }));
   root.append(el("h2", { text: goal.label }));
-  root.append(el("div", { class: "badges" }, [badge(relationStyle(goal.relation))]));
+  root.append(el("div", { class: "badges" }, [badge(checkStyle(goalStatus(goal)))]));
 
-  root.append(
-    el("p", { class: "meta", text: goal.inferred ? "Relation inferred from the selected diff; the spec text is unchanged." : "Goal read from the locked spec." }),
-  );
+  root.append(el("p", { class: "meta", text: "Goal read from the locked spec; the verdicts come from the checks it declares." }));
+
+  const checks = checksOf(goal);
+  root.append(el("h2", { class: "sub", text: "Checks" }));
+  if (checks.length === 0) {
+    root.append(el("p", { class: "empty", text: "No check defined for this goal. Nothing is inferred from its words." }));
+  } else {
+    const list = el("ul", { class: "checks" });
+    for (const check of checks) {
+      const facts = [`${check.subject} ${check.assertion}`, `declared ${locationText(check.spec_path, check.line, check.line)}`];
+      if (check.touched) facts.push("touched by the selected diff");
+      const row = el("li", { class: "check" }, [
+        el("div", { class: "check-head" }, [
+          badge(checkStyle(check.status)),
+          el("span", { class: "id", text: check.id }),
+        ]),
+        el("div", { class: "meta", text: facts.join(" · ") }),
+      ]);
+      if (check.reason) row.append(el("p", { class: "meta", text: check.reason }));
+      if ((check.evidence ?? []).length > 0) row.append(evidenceList(check.evidence ?? []));
+      list.append(row);
+    }
+    root.append(list);
+  }
 
   // Verification is its own axis, with its own evidence: a relation never adds up
   // to verified (AC3).
@@ -170,14 +191,6 @@ export function renderDetail(root: HTMLElement, state: State, selected: string |
     root.append(el("p", { class: "empty", text: "No verification evidence. Code presence is not verification." }));
   } else {
     root.append(evidenceList(vrefs));
-  }
-
-  root.append(el("h2", { class: "sub", text: "Evidence" }));
-  const refs = goal.evidence ?? [];
-  if (refs.length === 0) {
-    root.append(el("p", { class: "empty", text: "No evidence links this goal to code." }));
-  } else {
-    root.append(evidenceList(refs));
   }
 
   for (const diagnostic of goal.diagnostics ?? []) {
@@ -196,10 +209,9 @@ function renderArea(root: HTMLElement, state: State, dir: string): void {
 
   root.append(el("div", { class: "crumbs", text: "Project map › " + dir }));
   root.append(el("h2", { text: dir }));
-  const relations = links.map((link) => link.goal.relation);
-  const order = ["conflict", "appears-to-support", "unmapped", "stale", "unavailable"] as const;
-  const relation = order.find((candidate) => relations.includes(candidate)) ?? "unavailable";
-  root.append(el("div", { class: "badges" }, [badge(relationStyle(relation))]));
+  const statuses = links.map((link) => goalStatus(link.goal));
+  const worst = statuses.includes("violated") ? "violated" : statuses.includes("unknown") ? "unknown" : "pass";
+  root.append(el("div", { class: "badges" }, [badge(checkStyle(worst))]));
 
   const files = new Set(links.flatMap((link) => link.refs.map((ref) => ref.path)));
   root.append(
@@ -211,7 +223,7 @@ function renderArea(root: HTMLElement, state: State, dir: string): void {
 
   for (const link of links) {
     root.append(el("h2", { class: "sub", text: link.goal.label }));
-    root.append(el("div", { class: "badges" }, [badge(relationStyle(link.goal.relation))]));
+    root.append(el("div", { class: "badges" }, [badge(checkStyle(goalStatus(link.goal)))]));
     root.append(evidenceList(link.refs));
   }
 }
@@ -219,10 +231,14 @@ function renderArea(root: HTMLElement, state: State, dir: string): void {
 function overview(state: State): HTMLElement {
   const goals = state.goals ?? [];
   const areas = new Set<string>();
-  let links = 0;
+  let checks = 0;
+  const verdicts = { pass: 0, violated: 0, unknown: 0 };
   for (const goal of goals) {
     for (const area of goalAreas(goal)) areas.add(area.dir);
-    links += (goal.evidence ?? []).length;
+    for (const check of checksOf(goal)) {
+      checks++;
+      verdicts[check.status]++;
+    }
   }
   const changed = (state.diff.files ?? []).length;
   const modules = (state.structure?.modules ?? []).length;
@@ -231,7 +247,7 @@ function overview(state: State): HTMLElement {
     el("li", { text: `${modules} module${modules === 1 ? "" : "s"}, ${edges} internal import${edges === 1 ? "" : "s"}` }),
     el("li", { text: `${goals.length} goal${goals.length === 1 ? "" : "s"}` }),
     el("li", { text: `${areas.size} area${areas.size === 1 ? "" : "s"}` }),
-    el("li", { text: `${links} evidence link${links === 1 ? "" : "s"}` }),
+    el("li", { text: `${checks} check${checks === 1 ? "" : "s"} · ${verdicts.pass} pass · ${verdicts.violated} violated · ${verdicts.unknown} unknown` }),
     el("li", { text: `${changed} changed file${changed === 1 ? "" : "s"}` }),
   ]);
 }
@@ -246,7 +262,7 @@ function linkedGoals(state: State, path: string): HTMLElement {
   const list = el("div");
   const hits: Goal[] = [];
   (state.goals ?? []).forEach((goal) => {
-    if ((goal.evidence ?? []).some((ref) => ref.path === path)) hits.push(goal);
+    if (evidenceOf(goal).some((ref) => ref.path === path)) hits.push(goal);
   });
   list.append(el("h2", { class: "sub", text: "Goals linked to this file" }));
   if (hits.length === 0) {
@@ -254,7 +270,7 @@ function linkedGoals(state: State, path: string): HTMLElement {
     return list;
   }
   const ul = el("ul", { class: "facts" });
-  for (const goal of hits) ul.append(el("li", { text: goal.label + " — " + relationStyle(goal.relation).word }));
+  for (const goal of hits) ul.append(el("li", { text: goal.label + " — " + checkStyle(goalStatus(goal)).word }));
   list.append(ul);
   return list;
 }
@@ -286,7 +302,7 @@ export function renderConflicts(root: HTMLElement, state: State): void {
   for (const conflict of conflicts) {
     root.append(
       el("div", { class: "conflict" }, [
-        badge(relationStyle("conflict")),
+        badge(checkStyle("violated")),
         el("div", { class: "meta", text: "Prompt: “" + conflict.prompt + "”" }),
         el("div", { class: "diag", text: conflict.reason }),
         el("div", { class: "meta", text: conflict.spec_path + " › " + conflict.label }),

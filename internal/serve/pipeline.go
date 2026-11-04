@@ -104,8 +104,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	// (AC7). A prompt can never become the baseline.
 	if baseline.State == model.BaselineAvailable {
 		specPath := baseline.SpecPaths[0]
-		goals := analyze.Requirements(specPath, specBody(specs, specPath))
-		out.Conflicts = analyze.PromptConflicts(goals, o.Prompt)
+		body := specBody(specs, specPath)
 
 		if handle != nil {
 			loaded, err := handle.Load(fingerprint)
@@ -125,7 +124,14 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 			}
 		}
 
-		result := analyze.Analyze(goals, declarations, changesOf(changes), o.Prompt)
+		result := analyze.Analyze(
+			analyze.SpecDoc{Path: specPath, Body: body},
+			declarations,
+			structure,
+			changesOf(changes),
+			analyze.LanguageGap(tracked),
+			o.Prompt,
+		)
 		out.Snapshot.Assessments = result.Assessments
 		out.Snapshot.Diagnostics = append(out.Snapshot.Diagnostics, result.Diagnostics...)
 		if len(result.PromptConflicts) > 0 {

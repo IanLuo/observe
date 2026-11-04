@@ -9,29 +9,9 @@ import (
 	"observe/internal/model"
 )
 
-// Result is one analysis pass: the per-goal assessment and every place the task
-// prompt contradicts a locked goal.
-type Result struct {
-	Assessments     []model.GoalAssessment
-	PromptConflicts []model.PromptConflict
-	Diagnostics     []model.Diagnostic
-}
-
-// Analyze is the single entry point the composition root calls: link goals to
-// code, classify the selected diff, and compare the optional prompt against the
-// locked goals.
-//
-// The axes stay separate. The prompt can only add a conflict record; it cannot
-// change the baseline, remove a goal, or move a relation, and no input can make a
-// goal verified (AC3, AC5).
-func Analyze(goals []model.GoalLocator, decls []Declaration, changes []Change, prompt string) Result {
-	assessments, diags := Align(Assess(goals, decls), decls, changes)
-	return Result{
-		Assessments:     assessments,
-		PromptConflicts: PromptConflicts(goals, prompt),
-		Diagnostics:     diags,
-	}
-}
+// backtick captures a span the requirement marks as code. It is the strongest
+// signal a prose goal carries about what it is talking about.
+var backtick = regexp.MustCompile("`([^`\n]+)`")
 
 // negationCue are the words that turn a statement into a negation of it.
 var negationCue = regexp.MustCompile(`(?i)\b(?:not|never|no|don't|do not|skip|omit|ignore|drop|remove|without|replace)\b`)

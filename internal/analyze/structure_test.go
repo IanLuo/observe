@@ -117,8 +117,8 @@ func TestStructureOfMapsModulesAndTheirDependencies(t *testing.T) {
 	}
 
 	wantEdges := []ModuleEdge{
-		{From: "cmd/tool", To: "internal/a", Import: "observe/internal/a"},
-		{From: "internal/a", To: "internal/b", Import: "observe/internal/b"},
+		{From: "cmd/tool", To: "internal/a", Import: "observe/internal/a", Path: "cmd/tool/main.go", Line: 6},
+		{From: "internal/a", To: "internal/b", Import: "observe/internal/b", Path: "internal/a/a.go", Line: 6},
 	}
 	if len(structure.Edges) != len(wantEdges) {
 		t.Fatalf("edges = %+v, want %+v", structure.Edges, wantEdges)

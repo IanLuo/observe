@@ -36,12 +36,14 @@ func fixtureSnapshot(t *testing.T, fingerprint model.InputFingerprint) model.Sna
 				TextHash:     "goal-hash",
 				Label:        "the reader exposes `Open`",
 			},
-			Relation:     model.RelationAppearsToSupport,
-			Inferred:     true,
 			Verification: model.VerificationUnknown,
-			Evidence: []model.EvidenceRef{{
-				Path: "internal/repo/repo.go", Symbol: "Open", LineStart: 3, LineEnd: 5,
-				Kind: model.EvidenceDeclaration, Provenance: model.ProvenanceParserRule, Confidence: 0.9,
+			Checks: []model.Check{{
+				ID: "open-exists", Subject: "symbol Open", Assertion: "exists",
+				Status: model.CheckPass, SpecPath: ".agents/specs/spec.md", Line: 7,
+				Evidence: []model.EvidenceRef{{
+					Path: "internal/repo/repo.go", Symbol: "Open", LineStart: 3, LineEnd: 5,
+					Kind: model.EvidenceDeclaration, Provenance: model.ProvenanceParserRule, Confidence: 0.9,
+				}},
 			}},
 		}},
 	}

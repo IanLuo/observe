@@ -120,12 +120,23 @@ type Goal struct {
 	Heading              []string `json:"heading"`
 	Label                string   `json:"label"`
 	TextHash             string   `json:"text_hash"`
-	Relation             string   `json:"relation"`
-	Inferred             bool     `json:"inferred"`
+	Checks               []Check  `json:"checks"`
 	Verification         string   `json:"verification"`
-	Evidence             []Ref    `json:"evidence"`
 	VerificationEvidence []Ref    `json:"verification_evidence"`
 	Diagnostics          []string `json:"diagnostics"`
+}
+
+// Check is one declared assertion and its verdict.
+type Check struct {
+	ID        string `json:"id"`
+	Subject   string `json:"subject"`
+	Assertion string `json:"assertion"`
+	Status    string `json:"status"`
+	Reason    string `json:"reason,omitempty"`
+	Evidence  []Ref  `json:"evidence"`
+	Touched   bool   `json:"touched"`
+	SpecPath  string `json:"spec_path"`
+	Line      int    `json:"line"`
 }
 
 // Ref is one evidence reference: a repository path, a symbol, and a line range.
@@ -229,24 +240,38 @@ func structureOf(structure analyze.Structure) Structure {
 	return out
 }
 
-// goals maps assessments, downgrading every relation to stale when the snapshot
-// is no longer current.
+// goals maps assessments. A stale snapshot keeps its verdicts but every check is
+// marked unknown, because a verdict about data that is no longer current is not a
+// verdict about the code (AC9).
 func goals(assessments []model.GoalAssessment, freshness string) []Goal {
+	stale := freshness == string(model.FreshnessStale) || freshness == string(model.FreshnessFailed)
 	out := make([]Goal, len(assessments))
 	for i, a := range assessments {
-		relation := string(a.Relation)
-		if freshness == string(model.FreshnessStale) || freshness == string(model.FreshnessFailed) {
-			relation = string(model.RelationStale)
+		checks := make([]Check, len(a.Checks))
+		for j, c := range a.Checks {
+			checks[j] = Check{
+				ID:        c.ID,
+				Subject:   c.Subject,
+				Assertion: c.Assertion,
+				Status:    string(c.Status),
+				Reason:    c.Reason,
+				Evidence:  refs(c.Evidence),
+				Touched:   c.Touched,
+				SpecPath:  c.SpecPath,
+				Line:      c.Line,
+			}
+			if stale {
+				checks[j].Status = string(model.CheckUnknown)
+				checks[j].Reason = "the view is stale: the result predates the current inputs"
+			}
 		}
 		out[i] = Goal{
 			SpecPath:             a.Locator.SpecPath,
 			Heading:              append([]string{}, a.Locator.HeadingChain...),
 			Label:                a.Locator.Label,
 			TextHash:             a.Locator.TextHash,
-			Relation:             relation,
-			Inferred:             a.Inferred,
+			Checks:               checks,
 			Verification:         string(a.Verification),
-			Evidence:             refs(a.Evidence),
 			VerificationEvidence: refs(a.VerificationEvidence),
 			Diagnostics:          messages(a.Diagnostics),
 		}

@@ -8,8 +8,8 @@
 // of it (.agents/specs/design-system.md, whole-project visibility). Nothing here
 // decides a status; the shapes only show what the server said (architecture D5).
 
-import { Goal, Ref, Relation, State } from "./types";
-import { relationStyle, svgEl } from "./dom";
+import { Check, Goal, Ref, State } from "./types";
+import { checkStyle, svgEl } from "./dom";
 
 export interface MapOptions {
   selected: string | null;
@@ -46,19 +46,38 @@ export interface Area {
   dir: string;
   refs: Ref[];
   goals: number[];
-  relation: string;
 }
 
-/** areasOf collects one entry per directory across every goal, in first-seen order. */
+/** checksOf is a goal's checks, or none: a goal may declare no check at all. */
+export function checksOf(goal: Goal): Check[] {
+  return goal.checks ?? [];
+}
+
+/**
+ * goalStatus is the worst verdict among a goal's checks, and unknown when it has
+ * none. The server decides every verdict; this only picks the one that needs
+ * attention first, so a failing check is never hidden behind a passing one.
+ */
+export function goalStatus(goal: Goal): string {
+  let status = "";
+  for (const check of checksOf(goal)) {
+    if (check.status === "violated") return "violated";
+    if (check.status === "unknown") status = "unknown";
+    if (check.status === "pass" && !status) status = "pass";
+  }
+  return status || "unknown";
+}
+
+/** areasOf collects one entry per directory across every check's evidence. */
 export function areasOf(state: State): Area[] {
   const order: string[] = [];
   const byDir = new Map<string, Area>();
   (state.goals ?? []).forEach((goal, index) => {
-    for (const ref of goal.evidence ?? []) {
+    for (const ref of evidenceOf(goal)) {
       const dir = dirOf(ref.path);
       let area = byDir.get(dir);
       if (!area) {
-        area = { dir, refs: [], goals: [], relation: goal.relation };
+        area = { dir, refs: [], goals: [] };
         byDir.set(dir, area);
         order.push(dir);
       }
@@ -69,11 +88,16 @@ export function areasOf(state: State): Area[] {
   return order.map((dir) => byDir.get(dir) as Area);
 }
 
-/** areaGoals groups a goal's own evidence by directory, preserving evidence order. */
+/** evidenceOf is every reference the goal's checks rest on. */
+export function evidenceOf(goal: Goal): Ref[] {
+  return checksOf(goal).flatMap((check) => check.evidence ?? []);
+}
+
+/** goalAreas groups a goal's evidence by directory, preserving evidence order. */
 export function goalAreas(goal: Goal): { dir: string; refs: Ref[] }[] {
   const order: string[] = [];
   const byDir = new Map<string, Ref[]>();
-  for (const ref of goal.evidence ?? []) {
+  for (const ref of evidenceOf(goal)) {
     const dir = dirOf(ref.path);
     let list = byDir.get(dir);
     if (!list) {
@@ -86,13 +110,18 @@ export function goalAreas(goal: Goal): { dir: string; refs: Ref[] }[] {
   return order.map((dir) => ({ dir, refs: byDir.get(dir) as Ref[] }));
 }
 
-export function areaRelation(state: State, area: Area): Relation {
-  const relations: Relation[] = area.goals.map((i) => (state.goals ?? [])[i]?.relation ?? "unknown");
-  const order: Relation[] = ["conflict", "appears-to-support", "unmapped", "stale", "unavailable"];
-  for (const candidate of order) {
-    if (relations.includes(candidate)) return candidate;
+/** areaStatus is the worst verdict among the goals that point at this area. */
+export function areaStatus(state: State, area: Area): string {
+  let status = "";
+  for (const index of area.goals) {
+    const goal = (state.goals ?? [])[index];
+    if (!goal) continue;
+    const candidate = goalStatus(goal);
+    if (candidate === "violated") return "violated";
+    if (candidate === "unknown") status = "unknown";
+    if (candidate === "pass" && !status) status = "pass";
   }
-  return "unknown";
+  return status || "unknown";
 }
 
 interface Box {
@@ -145,7 +174,7 @@ export function layout(state: State, expanded: Set<string>, showDiff: boolean): 
       y,
       w: WIDTH.area,
       h: height,
-      cls: "node-area " + relationStyle(areaRelation(state, area)).cls + (open ? " open" : ""),
+      cls: "node-area " + checkStyle(areaStatus(state, area)).cls + (open ? " open" : ""),
       icon: files.length ? (open ? "▾" : "▸") : "·",
       label: short(area.dir, 38),
       sub:
@@ -166,7 +195,8 @@ export function layout(state: State, expanded: Set<string>, showDiff: boolean): 
   let free = 0;
   let previousGoal: Box | null = null;
   goals.forEach((goal, index) => {
-    const style = relationStyle(goal.relation);
+    const style = checkStyle(goalStatus(goal));
+    const checks = checksOf(goal);
     const dirs = goalAreas(goal).map((area) => area.dir);
     const linked = dirs.map((dir) => areaBoxes.get(dir)).filter((box): box is Box => !!box);
     let top: number;
@@ -186,7 +216,9 @@ export function layout(state: State, expanded: Set<string>, showDiff: boolean): 
       cls: "node-goal " + style.cls + (linked.length ? "" : " unlinked"),
       icon: style.icon,
       label: short(goal.label, 34),
-      sub: style.word + (goal.inferred ? " · inferred" : "") + (linked.length ? "" : " · no linked code"),
+      sub:
+        (checks.length ? `${style.word} · ${checks.length} check${checks.length === 1 ? "" : "s"}` : "No check defined") +
+        (linked.length ? "" : " · no code"),
       title: `${goal.heading.join(" › ")} — ${goal.label}`,
       column: "goal",
       rows: [],

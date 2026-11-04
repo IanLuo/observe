@@ -1,13 +1,7 @@
 // The wire contract, mirroring internal/serve/view.go. The UI computes no status
 // of its own: every string here is decided by the server (architecture D5).
 
-export type Relation =
-  | "appears-to-support"
-  | "conflict"
-  | "unmapped"
-  | "unknown"
-  | "unavailable"
-  | "stale";
+export type CheckStatus = "pass" | "violated" | "unknown";
 
 export type Verification = "verified" | "unknown" | "unavailable" | "failed";
 
@@ -24,15 +18,25 @@ export interface Ref {
   verifier?: string;
 }
 
+export interface Check {
+  id: string;
+  subject: string;
+  assertion: string;
+  status: CheckStatus;
+  reason?: string;
+  evidence: Ref[];
+  touched: boolean;
+  spec_path: string;
+  line: number;
+}
+
 export interface Goal {
   spec_path: string;
   heading: string[];
   label: string;
   text_hash: string;
-  relation: Relation;
-  inferred: boolean;
+  checks: Check[] | null;
   verification: Verification;
-  evidence: Ref[] | null;
   verification_evidence: Ref[] | null;
   diagnostics: string[] | null;
 }

@@ -41,6 +41,7 @@ type FileEdge struct {
 	Kind   string
 	Import string // the import path, for an import edge
 	Symbol string // the referenced name, for a reference edge
+	Line   int    // 1-based, for an import edge
 }
 
 // Module is one directory of source: its files, the declarations in them, and its
@@ -65,6 +66,8 @@ type ModuleEdge struct {
 	From   string
 	To     string
 	Import string
+	Path   string // the file the import was written in
+	Line   int    // 1-based line of the import statement
 }
 
 // StructureOf reads imports and declarations from the given files.
@@ -110,15 +113,16 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 			})
 			continue
 		}
-		for _, raw := range imports {
+		for _, imp := range imports {
+			raw := imp.Raw
 			if target, targetFile, ok := resolveImport(raw, f.Path, moduleDirs, fileSet, packageNames); ok {
 				if targetFile != "" && targetFile != f.Path {
-					out.FileEdges = append(out.FileEdges, FileEdge{From: f.Path, To: targetFile, Kind: "import", Import: raw})
+					out.FileEdges = append(out.FileEdges, FileEdge{From: f.Path, To: targetFile, Kind: "import", Import: raw, Line: imp.Line})
 				}
 				if target == dir {
 					continue // a file importing its own module is not a module edge
 				}
-				out.Edges = append(out.Edges, ModuleEdge{From: dir, To: target, Import: raw})
+				out.Edges = append(out.Edges, ModuleEdge{From: dir, To: target, Import: raw, Path: f.Path, Line: imp.Line})
 				module.DependsOn = append(module.DependsOn, target)
 				continue
 			}
@@ -366,25 +370,32 @@ func resolveImport(raw, filePath string, moduleDirs, fileSet map[string]bool, pa
 	return best, "", true
 }
 
-// importsOf lists the import paths in one file.
-func importsOf(lang string, f File) ([]string, error) {
+// importRef is one import statement and where it was written.
+type importRef struct {
+	Raw  string
+	Line int // 1-based
+}
+
+// importsOf lists the imports in one file with their lines, so a verdict that
+// depends on an import can point at the statement.
+func importsOf(lang string, f File) ([]importRef, error) {
 	tree, err := parse(lang, f)
 	if err != nil {
 		return nil, err
 	}
 	defer tree.Close()
 
-	var imports []string
+	var imports []importRef
 	var walk func(n *ts.Node)
 	walk = func(n *ts.Node) {
 		switch n.Kind() {
 		case "import_spec":
 			if c := n.ChildByFieldName("path"); c != nil {
-				imports = append(imports, unquote(c.Utf8Text(f.Body)))
+				imports = append(imports, importRef{Raw: unquote(c.Utf8Text(f.Body)), Line: int(n.StartPosition().Row) + 1})
 			}
 		case "import_statement":
 			if c := n.ChildByFieldName("source"); c != nil {
-				imports = append(imports, unquote(c.Utf8Text(f.Body)))
+				imports = append(imports, importRef{Raw: unquote(c.Utf8Text(f.Body)), Line: int(n.StartPosition().Row) + 1})
 			}
 		}
 		for i := uint(0); i < n.NamedChildCount(); i++ {

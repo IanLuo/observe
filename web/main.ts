@@ -160,7 +160,9 @@ function selectionExists(state: State, key: string): boolean {
   }
   if (key.startsWith("f:")) return (state.diff.files ?? []).some((file) => file.path === value);
   if (key.startsWith("a:")) {
-    return (state.goals ?? []).some((goal) => (goal.evidence ?? []).some((ref) => dirOf(ref.path) === value));
+    return (state.goals ?? []).some((goal) =>
+      (goal.checks ?? []).some((check) => (check.evidence ?? []).some((ref) => dirOf(ref.path) === value)),
+    );
   }
   return (state.goals ?? [])[Number(value)] != null;
 }

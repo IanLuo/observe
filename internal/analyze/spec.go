@@ -91,28 +91,84 @@ var contextOnly = map[string]bool{
 // "Verification" match a declaration it has nothing to do with.
 var leadIn = regexp.MustCompile(`^\*\*[^*]+\*\*[ \t]*:?[ \t]*`)
 
+// rawCheck is a check as written in the spec, before it is evaluated. Its
+// GoalHash names the goal bullet that encloses it.
+type rawCheck struct {
+	ID        string
+	SpecPath  string
+	GoalHash  string
+	Subject   string
+	Assertion string
+	Argument  string
+	Line      int // 1-based line in the spec
+}
+
+// specScan is one pass over a locked spec: the goals in it, the checks declared
+// in it, and everything it could not read.
+type specScan struct {
+	Goals  []model.GoalLocator
+	Checks []rawCheck
+	Diags  []model.Diagnostic
+}
+
 // Requirements lists the goal locators in one locked spec.
+func Requirements(specPath string, body []byte) []model.GoalLocator {
+	return scanSpec(specPath, body).Goals
+}
+
+// scanSpec reads goals and checks in one pass, because a check belongs to the goal
+// bullet that encloses it: the two cannot be read apart.
 //
 // A requirement is a top-level list item under a heading outside a context-only
 // section, outside fenced code. Only top-level items count: nested bullets are
 // detail under a requirement, not requirements of their own. A bullet that is
 // nothing but a bold label ("**In V1:**") introduces the nested bullets below it
 // and is not itself a requirement.
-func Requirements(specPath string, body []byte) []model.GoalLocator {
+//
+// A ```check block inside a requirement's bullet declares that goal's assertions.
+func scanSpec(specPath string, body []byte) specScan {
 	var (
-		goals []model.GoalLocator
-		stack []section // enclosing headings, outermost first
-		fence bool
+		out       specScan
+		stack     []section // enclosing headings, outermost first
+		fence     bool
+		checking  bool
+		lastGoal  string
+		seenCheck = map[string]bool{}
 	)
 
-	for _, line := range strings.Split(string(body), "\n") {
+	for i, line := range strings.Split(string(body), "\n") {
 		line = strings.TrimRight(line, "\r")
+		number := i + 1
+		trimmed := strings.TrimSpace(line)
 
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			fence = !fence
+		if strings.HasPrefix(trimmed, "```") {
+			if fence {
+				fence, checking = false, false
+				continue
+			}
+			fence = true
+			checking = strings.EqualFold(strings.TrimPrefix(trimmed, "```"), "check")
 			continue
 		}
 		if fence {
+			if !checking || trimmed == "" {
+				continue
+			}
+			check, diag := parseCheck(specPath, trimmed, number, lastGoal)
+			if diag != nil {
+				out.Diags = append(out.Diags, *diag)
+				continue
+			}
+			if seenCheck[check.ID] {
+				out.Diags = append(out.Diags, model.Diagnostic{
+					Path:    specPath,
+					Op:      "check",
+					Message: fmt.Sprintf("line %d: check id %q is declared twice; the second is ignored", number, check.ID),
+				})
+				continue
+			}
+			seenCheck[check.ID] = true
+			out.Checks = append(out.Checks, check)
 			continue
 		}
 
@@ -139,14 +195,92 @@ func Requirements(specPath string, body []byte) []model.GoalLocator {
 		for i, s := range stack {
 			chain[i] = s.text
 		}
-		goals = append(goals, model.GoalLocator{
+		goal := model.GoalLocator{
 			SpecPath:     specPath,
 			HeadingChain: chain,
 			TextHash:     textHash(label),
 			Label:        label,
-		})
+		}
+		out.Goals = append(out.Goals, goal)
+		lastGoal = goal.TextHash
 	}
-	return goals
+	return out
+}
+
+// checkSubjects are the things a check may name.
+var checkSubjects = map[string]bool{"symbol": true, "module": true, "file": true}
+
+// checkAssertions are the assertions a check may make, and whether each needs an
+// argument and a module subject.
+var checkAssertions = map[string]struct {
+	needsArgument bool
+	moduleOnly    bool
+}{
+	"exists":      {},
+	"absent":      {},
+	"imports":     {needsArgument: true, moduleOnly: true},
+	"not-imports": {needsArgument: true, moduleOnly: true},
+	"has-test":    {moduleOnly: true},
+}
+
+// parseCheck reads one line of a check block: "<id>: <subject> <assertion> [<argument>]".
+//
+// A line it cannot read becomes a diagnostic, never a guessed check: a check that
+// silently disappears would read as a goal with no check defined.
+func parseCheck(specPath, line string, number int, goalHash string) (rawCheck, *model.Diagnostic) {
+	refuse := func(why string) (rawCheck, *model.Diagnostic) {
+		return rawCheck{}, &model.Diagnostic{
+			Path:    specPath,
+			Op:      "check",
+			Message: fmt.Sprintf("line %d: %s: %q", number, why, line),
+		}
+	}
+
+	id, rest, ok := strings.Cut(line, ":")
+	id = strings.TrimSpace(id)
+	if !ok || id == "" {
+		return refuse("a check needs an id, as in \"store-exists: symbol Store exists\"")
+	}
+	if goalHash == "" {
+		return refuse("a check must sit inside a goal bullet")
+	}
+
+	fields := strings.Fields(rest)
+	if len(fields) < 3 {
+		return refuse("a check needs a subject, an assertion, and the subject's name")
+	}
+	kind, name, assertion := fields[0], fields[1], fields[2]
+	if !checkSubjects[kind] {
+		return refuse("unknown subject kind; use symbol, module, or file")
+	}
+	rule, known := checkAssertions[assertion]
+	if !known {
+		return refuse("unknown assertion; use exists, absent, imports, not-imports, or has-test")
+	}
+	if rule.moduleOnly && kind != "module" {
+		return refuse(assertion + " applies to a module subject")
+	}
+
+	argument := strings.Join(fields[3:], " ")
+	if rule.needsArgument && argument == "" {
+		return refuse(assertion + " needs a module to name")
+	}
+	if !rule.needsArgument && argument != "" {
+		return refuse(assertion + " takes no argument")
+	}
+	if argument != "" && strings.Contains(argument, " ") {
+		return refuse("an argument names one module")
+	}
+
+	return rawCheck{
+		ID:        id,
+		SpecPath:  specPath,
+		GoalHash:  goalHash,
+		Subject:   kind + " " + name,
+		Assertion: assertion,
+		Argument:  argument,
+		Line:      number,
+	}, nil
 }
 
 // section is one enclosing heading and the markdown depth it appeared at.

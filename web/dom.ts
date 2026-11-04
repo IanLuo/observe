@@ -48,18 +48,16 @@ export interface StatusStyle {
   cls: string;
 }
 
-export function relationStyle(relation: string): StatusStyle {
-  switch (relation) {
-    case "appears-to-support":
-      return { icon: "▲", word: "Appears to support", cls: "st-support" };
-    case "conflict":
-      return { icon: "⚠", word: "Conflict", cls: "st-conflict" };
-    case "unmapped":
-      return { icon: "◌", word: "Unmapped", cls: "st-unmapped" };
-    case "stale":
-      return { icon: "⏱", word: "Stale", cls: "st-stale" };
-    case "unavailable":
-      return { icon: "?", word: "Unavailable", cls: "st-unavailable" };
+/**
+ * checkStyle names a verdict. The word is part of the style, so a reader who cannot
+ * see the colour still gets the answer (design-system: never colour alone).
+ */
+export function checkStyle(status: string): StatusStyle {
+  switch (status) {
+    case "pass":
+      return { icon: "✓", word: "Pass", cls: "st-verified" };
+    case "violated":
+      return { icon: "✗", word: "Violated", cls: "st-conflict" };
     default:
       return { icon: "?", word: "Unknown", cls: "st-unknown" };
   }
