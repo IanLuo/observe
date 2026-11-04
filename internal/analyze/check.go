@@ -49,7 +49,7 @@ type Input struct {
 // passing (AC3). The prompt can only add a conflict record; it never moves a verdict
 // (AC5).
 func Analyze(in Input) Result {
-	covers := coverageOf(in.Sources)
+	covers := coverageOf(in.Sources, in.Decls)
 
 	var (
 		goals       []model.GoalLocator
@@ -152,23 +152,41 @@ func verificationEvidence(checks []model.Check) []model.EvidenceRef {
 // coversPattern matches the directive a test writes to claim a check.
 var coversPattern = regexp.MustCompile(`\bcovers:\s*([a-z0-9][a-z0-9-]*)`)
 
-// coverageOf finds the test declarations that name a check.
+// testStartPattern recognises the line that opens a test, so a directive can be
+// attached from the line above it. TypeScript tests are calls, not declarations, so
+// the parser does not hand them over as spans the way it hands over a Go function.
+var testStartPattern = regexp.MustCompile(`^\s*(func\s+(Test|Benchmark|Fuzz)\w*|(it|test|describe)(\.\w+)?\s*\()`)
+
+// coverageOf finds the tests that name a check.
 //
-// It reads test files only, and only for the directive: a test that happens to
-// mention a word is not evidence. Naming a check says the assertion is exercised;
-// nothing here runs the test, so it never says the assertion holds.
-func coverageOf(sources []File) map[string][]model.EvidenceRef {
+// The directive counts inside a test declaration, or on the lines directly above
+// one. A comment loose in a test file is not a test naming a check, so it is not
+// evidence. Naming a check says the assertion is exercised; nothing here runs the
+// test, so it never says the assertion holds.
+func coverageOf(sources []File, decls []Declaration) map[string][]model.EvidenceRef {
+	inTest := map[string][]Declaration{}
+	for _, d := range decls {
+		if d.IsTest {
+			inTest[d.Path] = append(inTest[d.Path], d)
+		}
+	}
+
 	out := map[string][]model.EvidenceRef{}
 	for _, f := range sources {
 		if !isTestPath(f.Path) {
 			continue
 		}
-		for i, line := range strings.Split(string(f.Body), "\n") {
+		lines := strings.Split(string(f.Body), "\n")
+		for i, line := range lines {
+			n := i + 1
+			if !onTest(n, lines, inTest[f.Path]) {
+				continue
+			}
 			for _, m := range coversPattern.FindAllStringSubmatch(line, -1) {
 				out[m[1]] = append(out[m[1]], model.EvidenceRef{
 					Path:       f.Path,
-					LineStart:  i + 1,
-					LineEnd:    i + 1,
+					LineStart:  n,
+					LineEnd:    n,
 					Kind:       model.EvidenceTest,
 					Provenance: model.ProvenanceParserRule,
 					Confidence: 1,
@@ -178,6 +196,23 @@ func coverageOf(sources []File) map[string][]model.EvidenceRef {
 		}
 	}
 	return out
+}
+
+// onTest reports whether a directive line belongs to a test: inside one of its
+// lines, or immediately above the line that opens it.
+func onTest(line int, lines []string, decls []Declaration) bool {
+	for _, d := range decls {
+		if line >= d.LineStart && line <= d.LineEnd {
+			return true
+		}
+	}
+	for next := line + 1; next <= len(lines) && next <= line+2; next++ {
+		if strings.TrimSpace(lines[next-1]) == "" {
+			continue
+		}
+		return testStartPattern.MatchString(lines[next-1])
+	}
+	return false
 }
 
 // evaluate decides every check against the declarations, the module graph, and the

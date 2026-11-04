@@ -404,3 +404,26 @@ func TestCoversInSourceFilesIsIgnored(t *testing.T) {
 		t.Fatalf("verification = %q; only a test file may claim coverage", got)
 	}
 }
+
+// A directive loose in a test file is not a test naming a check: the comment must
+// belong to a test, either inside it or just above the line that opens it.
+func TestCoversMustBelongToATest(t *testing.T) {
+	spec := checkSpec("a-imports-b: module internal/a imports internal/b")
+
+	stray := append(fixture(), File{
+		Path: "internal/a/stray.test.ts",
+		Body: []byte("// covers: a-imports-b\nimport { x } from \"./x\";\n\ndescribe(\"a\", () => {});\n"),
+	})
+	if got := checkNamed(t, analyzeDocs(t, []SpecDoc{{Path: "spec.md", Body: spec}}, "spec.md", stray, nil, Coverage{}, ""), "a-imports-b").Verification; got != model.VerificationUnknown {
+		t.Fatalf("verification = %q; a comment above an import is not a test", got)
+	}
+
+	named := append(fixture(), File{
+		Path: "internal/a/named.test.ts",
+		Body: []byte("import { x } from \"./x\";\n\n// covers: a-imports-b\ntest(\"the layer holds\", () => {});\n"),
+	})
+	check := checkNamed(t, analyzeDocs(t, []SpecDoc{{Path: "spec.md", Body: spec}}, "spec.md", named, nil, Coverage{}, ""), "a-imports-b")
+	if check.Verification != model.VerificationVerified {
+		t.Fatalf("verification = %q; the directive sits on the test", check.Verification)
+	}
+}
