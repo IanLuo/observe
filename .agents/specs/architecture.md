@@ -40,7 +40,7 @@
 - **`internal/model`:** shared types, status vocabulary, and typed errors. Imports no internal package.
 - **`web/`:** TypeScript/SVG client compiled to static assets and embedded by `internal/serve`; uses the HTTP contract, does not import Go internals or determine status.
   ```check
-  ui-is-embedded: file internal/serve/static/app.js exists
+  ui-assets-embedded: file internal/serve/assets.go exists
   ```
 - **Boundary rule:** each layer returns only evidence/status it can justify. Missing or unsupported evidence is explicit `unknown`/typed error, not empty success.
 
