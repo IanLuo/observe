@@ -34,7 +34,6 @@ type Verification string
 const (
 	VerificationVerified Verification = "verified"
 	VerificationUnknown  Verification = "unknown"
-	VerificationFailed   Verification = "failed"
 )
 
 // Freshness is the state of a whole snapshot relative to its inputs.

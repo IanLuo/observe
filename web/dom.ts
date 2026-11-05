@@ -67,10 +67,6 @@ export function verificationStyle(verification: string): StatusStyle {
   switch (verification) {
     case "verified":
       return { icon: "✓", word: "Verified", cls: "st-verified" };
-    case "failed":
-      return { icon: "⚠", word: "Verification failed", cls: "st-conflict" };
-    case "unavailable":
-      return { icon: "?", word: "Verification unavailable", cls: "st-unavailable" };
     default:
       return { icon: "?", word: "Not verified", cls: "st-unknown" };
   }

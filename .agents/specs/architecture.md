@@ -20,7 +20,7 @@
   model-imports-no-serve: module internal/model not-imports internal/serve
   ```
 - **`cmd/observe` → `internal/serve`:** flags/startup and browser opening only; no domain logic.
-- **`internal/serve` → `internal/repo`, `internal/analyze`, `internal/store`, `internal/watch`, `internal/model`:** HTTP/UI boundary and orchestration; does not invent evidence or compute statuses.
+- **`internal/serve` → `internal/repo`, `internal/analyze`, `internal/store`, `internal/model`:** HTTP/UI boundary and orchestration; does not invent evidence or compute statuses.
 - **`internal/repo` → `internal/model`:** read-only Git and file access; implements the Repo reader component in system design. Does not parse relationships, serve HTTP, or write.
   ```check
   repo-does-not-serve: module internal/repo not-imports internal/serve
@@ -36,7 +36,6 @@
   store-does-not-serve: module internal/store not-imports internal/serve
   no-history-snapshot: symbol Checkpoint absent
   ```
-- **`internal/watch` → `internal/model`:** file events, debounce, generation IDs. Does not parse or persist.
 - **`internal/model`:** shared types, status vocabulary, and typed errors. Imports no internal package.
 - **`web/`:** TypeScript/SVG client compiled to static assets and embedded by `internal/serve`; uses the HTTP contract, does not import Go internals or determine status.
   ```check
@@ -50,7 +49,6 @@
 - `internal/repo/` — read-only Git and file access.
 - `internal/analyze/` — local parser and evidence-linked candidate analysis.
 - `internal/store/` — SQLite replaceable current-state cache; no history.
-- `internal/watch/` — change events, debounce, and generation tracking.
 - `internal/serve/` — loopback HTTP/API, embedded UI, orchestration.
 - `web/` — TypeScript/SVG UI source; embedded output is generated, not committed.
 - `testdata/` — minimal fixture repositories; never user project data.

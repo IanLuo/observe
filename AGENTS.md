@@ -14,7 +14,7 @@
 - `nix develop --command go run ./cmd/observe <repository>` — serve the loopback UI on `127.0.0.1` (prints the URL); `-report` prints the same state as JSON and exits.
 - `observe stop [<path>]` — stop the instance serving that project, from any directory inside it. One instance per project; a second start reports the running one instead of shadowing it. The port is the first free one from 8080 unless `-addr` names an exact address.
 - `nix develop --command ./web/build.sh` — type-check and bundle `web/` into `internal/serve/static/app.js`. Run it after any `web/` change: the Go build embeds that file, and a test fails when it has drifted from the sources.
-- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links, diff classification, prompt conflicts, construction model: modules, declarations, import edges), `internal/store` (input fingerprint, disposable current-state cache), `internal/serve` (loopback HTTP, `/api/state`, lifecycle, embedded assets), `web/` (TypeScript project map, goal map, rail, detail panels), `cmd/observe`. `internal/watch` is designed, not built.
+- Implemented so far: `internal/model`, `internal/repo`, `internal/analyze` (goal baseline, requirement extraction, tree-sitter parsing, candidate links, diff classification, prompt conflicts, construction model: modules, declarations, import edges), goal checks read from any locked document (pass/violated/unknown with evidence, invariants outside the goal spec, `covers:` verification evidence), `internal/store` (input fingerprint, disposable current-state cache), `internal/serve` (loopback HTTP, `/api/state`, lifecycle, embedded assets), `web/` (TypeScript project map, goal map, rail, detail panels), `cmd/observe`.
 
 ## Hot invariants
 
@@ -38,7 +38,6 @@ cmd/observe
     └── internal/serve  ──→  internal/repo
           │               ├→ internal/analyze ──→ internal/model
           ├────────────────→ internal/store  ───→ internal/model
-          └── internal/watch ──────────────────→ internal/model
 
 web/ (TypeScript + SVG) ── built static assets embedded by internal/serve
 ```
@@ -48,7 +47,6 @@ web/ (TypeScript + SVG) ── built static assets embedded by internal/serve
 - `internal/repo/` — read-only Git and file access; system-design Repo reader.
 - `internal/analyze/` — deterministic parsing and evidence-linked candidate relationships.
 - `internal/store/` — replaceable SQLite current-state cache only; no historical snapshots.
-- `internal/watch/` — file events, 500 ms debounce, generation tracking.
 - `internal/serve/` — loopback HTTP/API and embedded UI; orchestrates pipeline.
 - `web/` — TypeScript/SVG UI source; no framework.
 - `docs/adr/` — decision records only when a decision requires separate history; none exist yet.

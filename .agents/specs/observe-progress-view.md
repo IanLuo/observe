@@ -101,7 +101,7 @@
 ## Rollback & recovery
 - **Analysis failure:** keep the last successful view, mark stale with timestamp/reason, set affected statuses unknown, offer retry.
 - **No previous successful view:** show the error and retain source browsing; do not fabricate a partial successful status.
-- **Refresh failure** (including a failed optional watcher): mark the view stale and offer manual refresh/retry; never assert freshness.
+- **Refresh failure:** mark the view stale and offer manual refresh/retry; never assert freshness.
 - **Cache corruption:** discard the unreadable current cache and rebuild from source/specs; preserve the repository unchanged.
 - **Rollback meaning:** disable the tool or remove its local cache; project files, Git state, and specs remain unchanged.
 - **Catastrophic failure:** silent goal/spec drift or false verification is the release-blocking trust failure.

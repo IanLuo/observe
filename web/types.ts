@@ -3,7 +3,7 @@
 
 export type CheckStatus = "pass" | "violated" | "unknown";
 
-export type Verification = "verified" | "unknown" | "unavailable" | "failed";
+export type Verification = "verified" | "unknown";
 
 export type Freshness = "updating" | "current" | "stale" | "failed";
 
