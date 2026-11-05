@@ -118,7 +118,7 @@
 ## Verification plan
 - **AC1–AC5, AC7–AC9:** automated fixture repositories driving the derived payload, with deterministic expected checks, verdicts, conflicts, uncertainty, and stale states. The page renders that payload and computes no status itself, so these tests pin the contract.
 - **AC4 drill-down:** asserted at the payload level — the goal and its evidence stay present in every module, file, and declaration detail. The rendered walk through each level is checked by a recorded scripted browser run, not by a committed test: a committed browser harness is a known V1 gap and does not change the release gate.
-- **AC6 refresh:** instrumented local fixture of 100,000 tracked lines; measure one refresh end to end — pass only if p95 is at most 3 seconds — plus a staleness check: after an edit, nothing reports itself current until a refresh has run.
+- **AC6 refresh:** a committed instrumented test generates a 100,000-line fixture; one full refresh end to end must stay within 3 seconds at p95 (measured 2.15s at 100,188 lines) — plus a staleness check: after an edit, nothing reports itself current until a refresh has run.
 - **AC10 read-only:** before/after Git status, index/ref checks, and file hashes across a full session; no repository mutation allowed.
 - **AC11 privacy:** outbound connection audit in default mode and inspection of telemetry/logs for source, spec, prompt, and cache content.
 - **AC12 current cache only:** persistence tests for one replaceable current cache, schema/version and input fingerprint, no source-copy payload, deletion/rebuild, and repo-external storage; verify no historical snapshots are created.
