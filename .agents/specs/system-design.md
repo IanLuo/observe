@@ -1,8 +1,8 @@
-<!-- specs:locked:432be7a 2026-11-04 type=system-design -->
+<!-- specs:locked:41b3610 2026-11-05 type=system-design -->
 
 ## Link contract
 - **upstream** (this doc relies on): .agents/specs/observe-progress-view.md
-- **referrers** (must cite this when they change): .agents/specs/architecture.md, .agents/specs/design-system.md
+- **referrers** (must cite this when they change): .agents/specs/architecture.md
 
 # System design — Observe
 ## Components & ownership
