@@ -10,6 +10,8 @@
 ## How to run / build / test
 
 - `nix develop --command sh -c 'go build ./... && go vet ./... && go test ./... -count=1 && gofmt -l .'` — build, vet, test, format check.
+- `nix develop --command go test ./internal/serve -run Browser -v` — drive the page in a real browser: drill-down, refresh on attention, panel resize. Uses `OBSERVE_CHROME` or a local Chrome/Chromium; skips (and says so) when there is none, so `nix build` and CI stay green without one.
+- `nix develop --command go test ./internal/serve -run OneHundredThousand -v` — the refresh budget: a generated 100,000-line fixture, an edit, one full refresh timed at p95 (measured 2.15s against a 3s budget). Skips under `-short`.
 - `nix build .` — hermetic build; `./result/bin/observe <repository>`.
 - `nix develop --command go run ./cmd/observe <repository>` — serve the loopback UI on `127.0.0.1` (prints the URL); `-report` prints the same state as JSON and exits.
 - `observe stop [<path>]` — stop the instance serving that project, from any directory inside it. One instance per project; a second start reports the running one instead of shadowing it. The port is the first free one from 8080 unless `-addr` names an exact address.
