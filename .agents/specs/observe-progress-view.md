@@ -1,4 +1,4 @@
-<!-- specs:locked:3d46843 2026-11-06 type=spec -->
+<!-- specs:locked:eee7bca 2026-11-06 type=spec -->
 
 ## Link contract
 - **upstream** (this doc relies on): none
