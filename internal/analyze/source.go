@@ -2,7 +2,6 @@ package analyze
 
 import (
 	"path"
-	"sort"
 	"strings"
 
 	ts "github.com/tree-sitter/go-tree-sitter"
@@ -52,44 +51,31 @@ var declarationKinds = map[string]map[string]bool{
 // reported as a diagnostic rather than skipped silently: an unparsed file is
 // unknown, never an absence of implementation (system-design, Failure modes).
 func Declarations(files []File) ([]Declaration, []model.Diagnostic) {
-	var (
-		decls []Declaration
-		diags []model.Diagnostic
-	)
+	scans, diags := scanFiles(files)
+	return declsFrom(files, scans), diags
+}
 
-	for _, f := range files {
-		lang, ok := languageFor(f.Path)
-		if !ok {
-			// Third-party code is excluded by policy, so silence is the honest answer.
-			if !OutOfScope(f.Path) {
-				diags = append(diags, model.Diagnostic{
-					Path:    f.Path,
-					Op:      "parse",
-					Message: "outside the V1 language set; its declarations stay unknown",
-				})
-			}
-			continue
-		}
+// Analysis is what one pass over the source files produces.
+type Analysis struct {
+	Declarations []Declaration
+	Structure    Structure
+	Diagnostics  []model.Diagnostic
+}
 
-		found, err := parseDeclarations(lang, f)
-		if err != nil {
-			diags = append(diags, model.Diagnostic{
-				Path:    f.Path,
-				Op:      "parse",
-				Message: err.Error(),
-			})
-			continue
-		}
-		decls = append(decls, found...)
+// AnalyzeSources parses each file once and derives the declarations and the
+// structure from the same trees.
+//
+// The pipeline takes everything from one call: asking for declarations and then for
+// the structure parsed every file twice.
+func AnalyzeSources(files []File) Analysis {
+	scans, diags := scanFiles(files)
+	structure, structureDiags := structureFrom(files, scans)
+
+	return Analysis{
+		Declarations: declsFrom(files, scans),
+		Structure:    structure,
+		Diagnostics:  append(diags, structureDiags...),
 	}
-
-	sort.Slice(decls, func(i, j int) bool {
-		if decls[i].Path != decls[j].Path {
-			return decls[i].Path < decls[j].Path
-		}
-		return decls[i].LineStart < decls[j].LineStart
-	})
-	return decls, diags
 }
 
 // sourceLanguage maps a V1 source extension to its grammar. The V1 language set
@@ -133,38 +119,6 @@ func languageFor(p string) (string, bool) {
 	return lang, ok
 }
 
-func parseDeclarations(lang string, f File) ([]Declaration, error) {
-	tree, err := parse(lang, f)
-	if err != nil || tree == nil {
-		return nil, err
-	}
-	defer tree.Close()
-
-	kinds := declarationKinds[lang]
-	isTestFile := isTestPath(f.Path)
-
-	var decls []Declaration
-	var walk func(n *ts.Node)
-	walk = func(n *ts.Node) {
-		if kinds[n.Kind()] {
-			if name := nameOf(n, f.Body); name != "" {
-				decls = append(decls, Declaration{
-					Name:      name,
-					Path:      f.Path,
-					LineStart: int(n.StartPosition().Row) + 1,
-					LineEnd:   int(n.EndPosition().Row) + 1,
-					IsTest:    isTestFile || strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Benchmark"),
-				})
-			}
-		}
-		for i := uint(0); i < n.NamedChildCount(); i++ {
-			walk(n.NamedChild(i))
-		}
-	}
-	walk(tree.RootNode())
-	return decls, nil
-}
-
 // nameOf reads a node's declared name. Grammar fields are used first; a
 // type_spec inside a grouped declaration has no name field of its own, so its
 // first identifier is used instead.
@@ -179,6 +133,11 @@ func nameOf(n *ts.Node, src []byte) string {
 		}
 	}
 	return ""
+}
+
+// isTestName reports whether a declaration name is a test by convention.
+func isTestName(name string) bool {
+	return strings.HasPrefix(name, "Test") || strings.HasPrefix(name, "Benchmark")
 }
 
 // isTestPath reports whether a path marks its declarations as tests.

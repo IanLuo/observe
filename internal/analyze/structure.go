@@ -72,6 +72,15 @@ type ModuleEdge struct {
 
 // StructureOf reads imports and declarations from the given files.
 func StructureOf(files []File) (Structure, []model.Diagnostic) {
+	// Parse and language diagnostics belong to the declaration pass, which reports
+	// them once; this pass reports only what the structure could not read.
+	scans, _ := scanFiles(files)
+	return structureFrom(files, scans)
+}
+
+// structureFrom assembles modules, import edges, and reference edges from one pass
+// over the files.
+func structureFrom(files []File, scans map[string]fileScan) (Structure, []model.Diagnostic) {
 	moduleDirs := map[string]bool{}
 	fileSet := map[string]bool{}
 	for _, f := range files {
@@ -88,8 +97,7 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 	var diags []model.Diagnostic
 
 	for _, f := range files {
-		lang, ok := languageFor(f.Path)
-		if !ok {
+		if _, ok := languageFor(f.Path); !ok {
 			continue
 		}
 		dir := moduleOf(f.Path)
@@ -105,15 +113,15 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 			continue
 		}
 
-		imports, err := importsOf(lang, f)
-		if err != nil {
+		scan := scans[f.Path]
+		if scan.ParseErr != "" {
 			diags = append(diags, model.Diagnostic{
 				Op:      "structure",
-				Message: "imports unreadable in " + f.Path + ": " + err.Error(),
+				Message: "imports unreadable in " + f.Path + ": " + scan.ParseErr,
 			})
 			continue
 		}
-		for _, imp := range imports {
+		for _, imp := range scan.Imports {
 			raw := imp.Raw
 			if target, targetFile, ok := resolveImport(raw, f.Path, moduleDirs, fileSet, packageNames); ok {
 				if targetFile != "" && targetFile != f.Path {
@@ -132,14 +140,13 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 
 	// Declaration counts finish the picture: a module's weight is its symbols, not
 	// its line count, and tests are counted apart from implementation.
-	var sourceFiles []File
+	sourceFiles := make([]File, 0, len(files))
 	for _, f := range files {
 		if _, ok := languageFor(f.Path); ok {
 			sourceFiles = append(sourceFiles, f)
 		}
 	}
-	decls, declDiags := Declarations(sourceFiles)
-	diags = append(diags, declDiags...)
+	decls := declsFrom(sourceFiles, scans)
 	perFile := map[string]int{}
 	for _, d := range decls {
 		module := byDir[moduleOf(d.Path)]
@@ -154,7 +161,7 @@ func StructureOf(files []File) (Structure, []model.Diagnostic) {
 		module.Decls = append(module.Decls, d)
 	}
 
-	out.FileEdges = append(out.FileEdges, referenceEdges(files, decls)...)
+	out.FileEdges = append(out.FileEdges, referenceEdges(files, decls, scans)...)
 
 	out.Modules = make([]Module, 0, len(byDir))
 	for _, module := range byDir {
@@ -199,7 +206,7 @@ const maxReferencesPerFile = 24
 // the structure a reader wants when asking how a module is put together. Names are
 // matched against declarations in the same module only, so a shared identifier in
 // another module never creates an edge.
-func referenceEdges(files []File, decls []Declaration) []FileEdge {
+func referenceEdges(files []File, decls []Declaration, scans map[string]fileScan) []FileEdge {
 	// Per module, so a name declared in two modules cannot cross-link them.
 	byModule := map[string]map[string]string{}
 	for _, d := range decls {
@@ -213,8 +220,7 @@ func referenceEdges(files []File, decls []Declaration) []FileEdge {
 	}
 	var edges []FileEdge
 	for _, f := range files {
-		lang, ok := languageFor(f.Path)
-		if !ok || isTestPath(f.Path) {
+		if _, ok := languageFor(f.Path); !ok || isTestPath(f.Path) {
 			continue
 		}
 		dir := moduleOf(f.Path)
@@ -222,8 +228,8 @@ func referenceEdges(files []File, decls []Declaration) []FileEdge {
 		if names == nil {
 			continue
 		}
-		used, err := identifiersOf(lang, f)
-		if err != nil {
+		used := scans[f.Path].Identifiers
+		if len(used) == 0 {
 			continue
 		}
 		seen := map[string]bool{}
@@ -248,14 +254,8 @@ func referenceEdges(files []File, decls []Declaration) []FileEdge {
 	return edges
 }
 
-// identifiersOf lists the identifier names a file mentions.
-func identifiersOf(lang string, f File) ([]string, error) {
-	tree, err := parse(lang, f)
-	if err != nil || tree == nil {
-		return nil, err
-	}
-	defer tree.Close()
-
+// identifiersIn lists the identifier names one tree mentions.
+func identifiersIn(tree *ts.Tree, f File) []string {
 	var names []string
 	var walk func(n *ts.Node)
 	walk = func(n *ts.Node) {
@@ -268,7 +268,7 @@ func identifiersOf(lang string, f File) ([]string, error) {
 		}
 	}
 	walk(tree.RootNode())
-	return names, nil
+	return names
 }
 
 // workspaceNames maps a package.json "name" to the directory that declares it.
@@ -378,13 +378,7 @@ type importRef struct {
 
 // importsOf lists the imports in one file with their lines, so a verdict that
 // depends on an import can point at the statement.
-func importsOf(lang string, f File) ([]importRef, error) {
-	tree, err := parse(lang, f)
-	if err != nil {
-		return nil, err
-	}
-	defer tree.Close()
-
+func importsIn(tree *ts.Tree, f File) []importRef {
 	var imports []importRef
 	var walk func(n *ts.Node)
 	walk = func(n *ts.Node) {
@@ -403,7 +397,7 @@ func importsOf(lang string, f File) ([]importRef, error) {
 		}
 	}
 	walk(tree.RootNode())
-	return imports, nil
+	return imports
 }
 
 // unquote strips the quotes around an import path.

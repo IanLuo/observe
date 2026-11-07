@@ -56,19 +56,20 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 		docs[i] = analyze.Doc{Path: s.Path, Family: s.Lock.Family, Type: s.Lock.Type}
 	}
 	baseline := analyze.Baseline(docs)
-	declarations, parseDiags := analyze.Declarations(sources)
-	parseDiags = append(parseDiags, sourceDiags...)
-	if names := summaryNames(skipped); names != "" {
-		parseDiags = append(parseDiags, model.Diagnostic{Op: "diff", Message: names})
-	}
 
 	// The project's construction does not depend on a goal baseline, so it is read
 	// before the baseline branch: a repository with a missing or conflicting
-	// baseline can still be seen (AC7).
+	// baseline can still be seen (AC7). Manifests join the pass because a workspace
+	// package name is what makes a bare import resolvable.
 	manifests, manifestDiags := readManifests(r, tracked)
-	structure, structureDiags := analyze.StructureOf(append(append([]analyze.File{}, sources...), manifests...))
-	structureDiags = append(structureDiags, manifestDiags...)
-	parseDiags = append(parseDiags, structureDiags...)
+	scanned := analyze.AnalyzeSources(append(append([]analyze.File{}, sources...), manifests...))
+	declarations, structure := scanned.Declarations, scanned.Structure
+
+	parseDiags := append(scanned.Diagnostics, sourceDiags...)
+	parseDiags = append(parseDiags, manifestDiags...)
+	if names := summaryNames(skipped); names != "" {
+		parseDiags = append(parseDiags, model.Diagnostic{Op: "diff", Message: names})
+	}
 
 	fingerprint := analyze.Fingerprint(analyze.FingerprintInput{
 		RepoIdentity:  r.Identity(),
