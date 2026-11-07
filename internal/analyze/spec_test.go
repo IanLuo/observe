@@ -1,6 +1,7 @@
 package analyze
 
 import (
+	"strings"
 	"testing"
 
 	"observe/internal/model"
@@ -139,5 +140,56 @@ func TestRequirementsSkipsLabelOnlyBullets(t *testing.T) {
 	goals := Requirements("spec.md", body)
 	if len(goals) != 1 || goals[0].Label != "a real requirement" {
 		t.Fatalf("goals = %+v", goals)
+	}
+}
+
+// A numbered heading is still the section it names. The specs skill writes plain
+// names; real documents number them, and a context section that goes unrecognised
+// turns its prose into goals — the reader is then shown "the buyer. They pay for a
+// budget" as something the project must do.
+func TestNumberedContextSectionsContributeNoGoals(t *testing.T) {
+	body := []byte(strings.Join([]string{
+		"# Spec",
+		"",
+		"## 1 · Problem & who breaks",
+		"- **Who breaks:** a small operator. They sell access.",
+		"",
+		"## 2 · Non-negotiable outcome",
+		"- A buyer can never spend past the budget.",
+		"",
+		"## 5 · KPIs & failure signal",
+		"- claim success rate above 99%.",
+		"",
+		"## 6. Assumptions & dependencies",
+		"- the network stays up.",
+		"",
+		"## 7) Verification plan",
+		"- run it by hand.",
+		"",
+		"## 3 · Scope in / out + primary flow",
+		"- One claim per order.",
+	}, "\n") + "\n")
+
+	goals := Requirements("spec.md", body)
+	want := []string{"A buyer can never spend past the budget.", "One claim per order."}
+	if len(goals) != len(want) {
+		t.Fatalf("goals = %d, want %d: %+v", len(goals), len(want), goals)
+	}
+	for i, label := range want {
+		if goals[i].Label != label {
+			t.Errorf("goal %d = %q, want %q", i, goals[i].Label, label)
+		}
+	}
+}
+
+// The number is part of the document, so the locator keeps it: a reader who
+// follows the crumb lands on the heading as written.
+func TestHeadingChainKeepsSectionNumbers(t *testing.T) {
+	goals := Requirements("spec.md", []byte("## 3 · Scope in / out\n- One claim per order.\n"))
+	if len(goals) != 1 {
+		t.Fatalf("goals = %+v", goals)
+	}
+	if got := goals[0].HeadingChain; len(got) != 1 || got[0] != "3 · Scope in / out" {
+		t.Errorf("heading chain = %v", got)
 	}
 }

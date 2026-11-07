@@ -179,7 +179,8 @@ func scanSpec(specPath string, body []byte) specScan {
 			for len(stack) > 0 && stack[len(stack)-1].depth >= depth {
 				stack = stack[:len(stack)-1]
 			}
-			stack = append(stack, section{depth: depth, text: normalize(m[2])})
+			text := normalize(m[2])
+			stack = append(stack, section{depth: depth, text: text, key: sectionKey(text)})
 			continue
 		}
 
@@ -287,6 +288,20 @@ func parseCheck(specPath, line string, number int, goalHash string) (rawCheck, *
 type section struct {
 	depth int
 	text  string
+	// key is the heading without its section number. The number stays in text,
+	// because a locator shows the heading as the document wrote it; only the
+	// context-only lookup ignores it.
+	key string
+}
+
+// sectionNumber matches a leading section number: "1 · ", "2. ", "6) ", "§3 ".
+// The separator is required, so a heading that merely starts with digits
+// ("100 lines per file") is left alone.
+var sectionNumber = regexp.MustCompile(`^(?:§\s*)?\d+(?:\.\d+)*\s*[·.:)–-]\s*`)
+
+// sectionKey is the heading text without its number.
+func sectionKey(text string) string {
+	return strings.TrimSpace(sectionNumber.ReplaceAllString(text, ""))
 }
 
 // isTopLevelItem reports whether line is an unindented "- " or "* " list item.
@@ -301,10 +316,12 @@ func isTopLevelItem(line string) bool {
 }
 
 // inContextOnly reports whether the heading chain sits inside a context-only
-// section.
+// section. The lookup ignores section numbers: real documents write
+// "## 1 · Problem & who breaks", and a section that goes unrecognised turns its
+// prose into goals.
 func inContextOnly(stack []section) bool {
 	for _, s := range stack {
-		if contextOnly[s.text] {
+		if contextOnly[s.key] {
 			return true
 		}
 	}
