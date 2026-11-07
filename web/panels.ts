@@ -166,10 +166,12 @@ export function renderDetail(root: HTMLElement, state: State, selected: string |
     }),
   );
 
+  if (goal.reading) root.append(el("p", { class: "reading", text: goal.reading }));
+
   const checks = checksOf(goal);
   root.append(el("h2", { class: "sub", text: "Checks" }));
   if (checks.length === 0) {
-    root.append(el("p", { class: "empty", text: "No check defined for this goal. Nothing is inferred from its words." }));
+    root.append(el("p", { class: "empty", text: "No check defined for this goal. The spec states a claim; nothing measures it." }));
   } else {
     const list = el("ul", { class: "checks" });
     for (const check of checks) {
@@ -179,6 +181,7 @@ export function renderDetail(root: HTMLElement, state: State, selected: string |
         el("div", { class: "check-head" }, [
           badge(checkStyle(check.status)),
           el("span", { class: "id", text: check.id }),
+          el("span", { class: "measure", text: `${measureWord(check.measures)} · ${check.finding}` }),
         ]),
         el("div", { class: "meta", text: facts.join(" · ") }),
       ]);
@@ -346,4 +349,16 @@ export function renderFooter(root: HTMLElement, state: State): void {
   parts.push(...shown);
   if (diagnostics.length > shown.length) parts.push(`… ${diagnostics.length - shown.length} more`);
   root.textContent = parts.join(" · ");
+}
+
+/** measureWord names what a check looked at, in one word. */
+function measureWord(measures: string): string {
+  switch (measures) {
+    case "dependency":
+      return "wiring";
+    case "test":
+      return "tests";
+    default:
+      return "presence";
+  }
 }

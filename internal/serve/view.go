@@ -1,6 +1,8 @@
 package serve
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"observe/internal/analyze"
@@ -116,12 +118,15 @@ type DiffLine struct {
 // that justifies it. Relation and Verification are separate axes: no value here
 // can add up to "verified" without explicit verification evidence (AC3).
 type Goal struct {
-	SpecPath             string   `json:"spec_path"`
-	Heading              []string `json:"heading"`
-	Label                string   `json:"label"`
-	TextHash             string   `json:"text_hash"`
-	Invariant            bool     `json:"invariant"`
-	Checks               []Check  `json:"checks"`
+	SpecPath  string   `json:"spec_path"`
+	Heading   []string `json:"heading"`
+	Label     string   `json:"label"`
+	TextHash  string   `json:"text_hash"`
+	Invariant bool     `json:"invariant"`
+	Checks    []Check  `json:"checks"`
+	// Reading says what this goal's verdicts do and do not prove, so a passing
+	// presence check is not read as proof of behaviour (AC15).
+	Reading              string   `json:"reading"`
 	Verification         string   `json:"verification"`
 	VerificationEvidence []Ref    `json:"verification_evidence"`
 	Diagnostics          []string `json:"diagnostics"`
@@ -132,7 +137,9 @@ type Check struct {
 	ID                   string `json:"id"`
 	Subject              string `json:"subject"`
 	Assertion            string `json:"assertion"`
+	Measures             string `json:"measures"`
 	Status               string `json:"status"`
+	Finding              string `json:"finding"`
 	Reason               string `json:"reason,omitempty"`
 	Evidence             []Ref  `json:"evidence"`
 	Inspected            int    `json:"inspected"`
@@ -141,6 +148,101 @@ type Check struct {
 	VerificationEvidence []Ref  `json:"verification_evidence"`
 	SpecPath             string `json:"spec_path"`
 	Line                 int    `json:"line"`
+}
+
+// finding is the verdict said in the words of what was looked at: "present" is a
+// different claim from "imports it", and neither is "works".
+func finding(c model.Check) string {
+	if c.Status == model.CheckUnknown {
+		return "not decided"
+	}
+	pass := c.Status == model.CheckPass
+
+	switch {
+	case strings.HasPrefix(c.Assertion, "not-imports"):
+		if pass {
+			return "no such import"
+		}
+		return "imports anyway"
+	case strings.HasPrefix(c.Assertion, "imports"):
+		if pass {
+			return "wired"
+		}
+		return "not wired"
+	case c.Assertion == "has-test":
+		if pass {
+			return "tests found"
+		}
+		return "no tests found"
+	case c.Assertion == "absent":
+		if pass {
+			return "not present"
+		}
+		return "present"
+	default:
+		if pass {
+			return "present"
+		}
+		return "not present"
+	}
+}
+
+// reading is the goal's verdicts translated into what they do not prove.
+//
+// A goal with no check is a claim, not a status, and says so. A goal whose checks
+// only look for names says that too: presence is not behaviour (AC15).
+func reading(checks []Check) string {
+	if len(checks) == 0 {
+		return "No check defined: the spec states this as a claim and nothing measures it."
+	}
+
+	var violated, unknown, verified int
+	presenceOnly := true
+	for _, c := range checks {
+		switch c.Status {
+		case string(model.CheckViolated):
+			violated++
+		case string(model.CheckPass):
+		default:
+			unknown++
+		}
+		if c.Measures != string(model.MeasuresPresence) {
+			presenceOnly = false
+		}
+		if c.Verification == string(model.VerificationVerified) {
+			verified++
+		}
+	}
+
+	several := len(checks) > 1
+	var head string
+	switch {
+	case violated > 0:
+		head = fmt.Sprintf("%d of %d checks violated", violated, len(checks))
+	case unknown > 0:
+		head = fmt.Sprintf("%d of %d checks could not be decided", unknown, len(checks))
+	case several:
+		head = fmt.Sprintf("All %d checks hold", len(checks))
+	default:
+		head = "The check holds"
+	}
+
+	var tail []string
+	if presenceOnly {
+		if several {
+			tail = append(tail, "they find names, not behaviour")
+		} else {
+			tail = append(tail, "it finds a name, not behaviour")
+		}
+	}
+	if verified > 0 {
+		tail = append(tail, fmt.Sprintf("%d named by a test, which is coverage and not a passing result", verified))
+	} else if several {
+		tail = append(tail, "no test names them")
+	} else {
+		tail = append(tail, "no test names it")
+	}
+	return head + "; " + strings.Join(tail, "; ") + "."
 }
 
 // Ref is one evidence reference: a repository path, a symbol, and a line range.
@@ -257,6 +359,8 @@ func goals(assessments []model.GoalAssessment, freshness string) []Goal {
 				ID:                   c.ID,
 				Subject:              c.Subject,
 				Assertion:            c.Assertion,
+				Measures:             string(c.Measures),
+				Finding:              finding(c),
 				Status:               string(c.Status),
 				Reason:               c.Reason,
 				Evidence:             refs(c.Evidence),
@@ -269,6 +373,7 @@ func goals(assessments []model.GoalAssessment, freshness string) []Goal {
 			}
 			if stale {
 				checks[j].Status = string(model.CheckUnknown)
+				checks[j].Finding = "not decided"
 				checks[j].Reason = "the view is stale: the result predates the current inputs"
 				checks[j].Verification = string(model.VerificationUnknown)
 			}
@@ -280,6 +385,7 @@ func goals(assessments []model.GoalAssessment, freshness string) []Goal {
 			TextHash:             a.Locator.TextHash,
 			Invariant:            a.Invariant,
 			Checks:               checks,
+			Reading:              reading(checks),
 			Verification:         string(a.Verification),
 			VerificationEvidence: refs(a.VerificationEvidence),
 			Diagnostics:          messages(a.Diagnostics),

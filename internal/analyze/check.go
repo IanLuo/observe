@@ -242,6 +242,7 @@ func evaluate(checks []rawCheck, decls []Declaration, st Structure, coverage Cov
 	out := make([]model.Check, len(checks))
 	for i, c := range checks {
 		out[i] = decide(c, modules, symbols, edges, files, coverage)
+		out[i].Measures = measuresOf(c.Assertion)
 		// Verification starts unknown: no verdict and no coverage by default (AC3).
 		out[i].Verification = model.VerificationUnknown
 	}
@@ -437,6 +438,20 @@ func fileRefs(files []string) []model.EvidenceRef {
 		refs = append(refs, fileRef(f))
 	}
 	return bound(refs)
+}
+
+// measuresOf names what an assertion looks at. The assertions are not equally
+// strong: finding a name says nothing about what it does (AC15).
+func measuresOf(assertion string) model.Measures {
+	switch {
+	case assertion == "has-test":
+		return model.MeasuresTest
+	case assertion == "imports" || strings.HasPrefix(assertion, "imports "),
+		assertion == "not-imports" || strings.HasPrefix(assertion, "not-imports "):
+		return model.MeasuresDependency
+	default:
+		return model.MeasuresPresence
+	}
 }
 
 func fileRef(p string) model.EvidenceRef {

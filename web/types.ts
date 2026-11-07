@@ -22,7 +22,9 @@ export interface Check {
   id: string;
   subject: string;
   assertion: string;
+  measures: "presence" | "dependency" | "test";
   status: CheckStatus;
+  finding: string;
   reason?: string;
   evidence: Ref[];
   inspected: number;
@@ -40,6 +42,7 @@ export interface Goal {
   text_hash: string;
   invariant: boolean;
   checks: Check[] | null;
+  reading: string;
   verification: Verification;
   verification_evidence: Ref[] | null;
   diagnostics: string[] | null;

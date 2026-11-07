@@ -109,6 +109,10 @@ type Diagnostic struct {
 // repository. Touched says the selected diff changed a file the check's evidence
 // depends on; it never makes a check pass (AC2).
 type Check struct {
+	// Measures is what the check looked at. A passing presence check proves a name
+	// exists, not that behaviour holds, so the reader is told which one it was
+	// (AC15).
+	Measures  Measures
 	ID        string
 	Subject   string // "symbol Store", "module internal/analyze", "file web/main.ts"
 	Assertion string // "exists", "absent", "imports internal/repo", "has-test"
@@ -127,6 +131,18 @@ type Check struct {
 	SpecPath             string
 	Line                 int // where the check is declared, 1-based
 }
+
+// Measures names what a check looked at, so a verdict is read at its real strength.
+type Measures string
+
+const (
+	// MeasuresPresence: a symbol, module, or file does or does not exist.
+	MeasuresPresence Measures = "presence"
+	// MeasuresDependency: one module does or does not import another.
+	MeasuresDependency Measures = "dependency"
+	// MeasuresTest: a module carries test declarations.
+	MeasuresTest Measures = "test"
+)
 
 // GoalAssessment is the per-goal result: the checks the spec declares for it, on
 // one axis, and a verification on another.

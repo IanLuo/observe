@@ -342,3 +342,15 @@ footer {
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+
+/* The goal says what its verdicts do not prove; a verdict sits beside its measure. */
+.reading {
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--accent);
+  background: var(--canvas);
+  border-radius: 0 5px 5px 0;
+  font: 12px var(--sans);
+  color: var(--text-2);
+}
+.check .measure { margin-left: auto; font: 11px var(--sans); color: var(--text-2); }

@@ -427,3 +427,31 @@ func TestCoversMustBelongToATest(t *testing.T) {
 		t.Fatalf("verification = %q; the directive sits on the test", check.Verification)
 	}
 }
+
+// AC15: a check says what it looked at, because finding a name and finding a
+// dependency are different claims, and neither is behaviour.
+func TestChecksNameWhatTheyMeasured(t *testing.T) {
+	want := map[string]model.Measures{
+		"symbol-open":  model.MeasuresPresence,
+		"symbol-gone":  model.MeasuresPresence,
+		"module-a":     model.MeasuresDependency,
+		"module-b":     model.MeasuresDependency,
+		"module-tests": model.MeasuresTest,
+	}
+	spec := checkSpec(
+		"symbol-open: symbol A exists",
+		"symbol-gone: symbol Missing absent",
+		"module-a: module internal/a imports internal/b",
+		"module-b: module internal/a not-imports internal/b",
+		"module-tests: module internal/a has-test",
+	)
+	result := analyzeDocs(t, []SpecDoc{{Path: "spec.md", Body: spec}}, "spec.md", fixture(), nil, Coverage{}, "")
+
+	for _, a := range result.Assessments {
+		for _, c := range a.Checks {
+			if got := c.Measures; got != want[c.ID] {
+				t.Errorf("%s measures %q, want %q", c.ID, got, want[c.ID])
+			}
+		}
+	}
+}
