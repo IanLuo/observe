@@ -73,6 +73,18 @@ export interface Symbol {
   path: string;
   line: number;
   test?: boolean;
+  complexity: number;
+  churn?: number;
+}
+
+/** Hotspot is a declaration that is hard to read and often changed. */
+export interface Hotspot {
+  symbol: string;
+  module: string;
+  path: string;
+  line: number;
+  complexity: number;
+  churn: number;
 }
 
 export interface Module {
@@ -82,6 +94,10 @@ export interface Module {
   symbols_truncated?: boolean;
   depends_on: string[] | null;
   imports: string[] | null;
+  fan_in: number;
+  fan_out: number;
+  instability: number;
+  in_cycle?: boolean;
 }
 
 export interface Edge {
@@ -94,6 +110,7 @@ export interface Edge {
 
 export interface Structure {
   modules: Module[];
+  cycles: string[][] | null;
   edges: Edge[];
   file_edges: Edge[];
 }
@@ -127,6 +144,7 @@ export interface State {
   diff: { hash: string; files: DiffFile[] | null };
   structure: Structure;
   goals: Goal[] | null;
+  hotspots: Hotspot[] | null;
   prompt_conflicts: Conflict[] | null;
   diagnostics: string[] | null;
   cache: Cache;

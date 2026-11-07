@@ -2,6 +2,7 @@ package serve
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -30,6 +31,7 @@ type State struct {
 	Diff        Diff       `json:"diff"`
 	Structure   Structure  `json:"structure"`
 	Goals       []Goal     `json:"goals"`
+	Hotspots    []Hotspot  `json:"hotspots"`
 	Conflicts   []Conflict `json:"prompt_conflicts"`
 	Diagnostics []string   `json:"diagnostics"`
 	Cache       Cache      `json:"cache"`
@@ -40,7 +42,10 @@ type State struct {
 // because construction does not depend on a spec (AC7).
 type Structure struct {
 	Modules []Module `json:"modules"`
-	Edges   []Edge   `json:"edges"`
+	// Cycles are the module import cycles, each as its members. Empty means the
+	// analysis looked and found none (AC16).
+	Cycles [][]string `json:"cycles"`
+	Edges  []Edge     `json:"edges"`
 	// FileEdges are the imports that stay inside one module, which the module graph
 	// hides and the drill-down draws.
 	FileEdges []Edge `json:"file_edges"`
@@ -57,6 +62,12 @@ type Module struct {
 	Truncated bool     `json:"symbols_truncated,omitempty"`
 	DependsOn []string `json:"depends_on"`
 	Imports   []string `json:"imports"`
+	// Coupling, counted from module edges (AC16).
+	FanIn       int     `json:"fan_in"`
+	FanOut      int     `json:"fan_out"`
+	Instability float64 `json:"instability"`
+	// InCycle names the cycle this module sits in, when it does.
+	InCycle bool `json:"in_cycle,omitempty"`
 }
 
 // Symbol is one declaration in a module.
@@ -65,6 +76,21 @@ type Symbol struct {
 	Path   string `json:"path"`
 	Line   int    `json:"line"`
 	IsTest bool   `json:"test,omitempty"`
+	// Complexity is one plus the branch points in the declaration (AC17).
+	Complexity int `json:"complexity"`
+	// Churn is how many recent commits touched this file.
+	Churn int `json:"churn,omitempty"`
+}
+
+// Hotspot is a declaration that is both hard to read and often changed: the two
+// facts together say where reading effort goes (AC17).
+type Hotspot struct {
+	Symbol     string `json:"symbol"`
+	Module     string `json:"module"`
+	Path       string `json:"path"`
+	Line       int    `json:"line"`
+	Complexity int    `json:"complexity"`
+	Churn      int    `json:"churn"`
 }
 
 // Edge is one relation between two files or modules. Kind is "import" or
@@ -293,7 +319,8 @@ func newState(a Analyzed, freshness string, failure *Failure, cache Cache) State
 			Hash:  a.Snapshot.Fingerprint.DiffHash,
 			Files: diffFiles(a.Changes),
 		},
-		Structure:   structureOf(a.Structure),
+		Structure:   structureOf(a.Structure, a.Churn),
+		Hotspots:    hotspots(a.Structure, a.Churn),
 		Goals:       goals(a.Snapshot.Assessments, freshness),
 		Diagnostics: messages(a.Snapshot.Diagnostics),
 		Cache:       cache,
@@ -317,24 +344,42 @@ func newState(a Analyzed, freshness string, failure *Failure, cache Cache) State
 }
 
 // structureOf maps the construction to the wire contract.
-func structureOf(structure analyze.Structure) Structure {
+func structureOf(structure analyze.Structure, churn map[string]int) Structure {
 	out := Structure{
 		Modules:   make([]Module, len(structure.Modules)),
+		Cycles:    structure.Cycles,
 		Edges:     make([]Edge, len(structure.Edges)),
 		FileEdges: make([]Edge, len(structure.FileEdges)),
+	}
+	inCycle := map[string]bool{}
+	for _, cycle := range structure.Cycles {
+		for _, dir := range cycle {
+			inCycle[dir] = true
+		}
 	}
 	for i, m := range structure.Modules {
 		symbols := make([]Symbol, len(m.Decls))
 		for j, d := range m.Decls {
-			symbols[j] = Symbol{Name: d.Name, Path: d.Path, Line: d.LineStart, IsTest: d.IsTest}
+			symbols[j] = Symbol{
+				Name:       d.Name,
+				Path:       d.Path,
+				Line:       d.LineStart,
+				IsTest:     d.IsTest,
+				Complexity: d.Complexity,
+				Churn:      churn[d.Path],
+			}
 		}
 		out.Modules[i] = Module{
-			Dir:       m.Dir,
-			Files:     append([]string{}, m.Files...),
-			Symbols:   symbols,
-			Truncated: m.Truncated,
-			DependsOn: append([]string{}, m.DependsOn...),
-			Imports:   append([]string{}, m.Imports...),
+			Dir:         m.Dir,
+			Files:       append([]string{}, m.Files...),
+			Symbols:     symbols,
+			Truncated:   m.Truncated,
+			DependsOn:   append([]string{}, m.DependsOn...),
+			Imports:     append([]string{}, m.Imports...),
+			FanIn:       m.FanIn,
+			FanOut:      m.FanOut,
+			Instability: m.Instability,
+			InCycle:     inCycle[m.Dir],
 		}
 	}
 	for i, e := range structure.Edges {
@@ -342,6 +387,51 @@ func structureOf(structure analyze.Structure) Structure {
 	}
 	for i, e := range structure.FileEdges {
 		out.FileEdges[i] = Edge{From: e.From, To: e.To, Kind: e.Kind, Import: e.Import, Symbol: e.Symbol}
+	}
+	return out
+}
+
+// hotspotComplexity is where a declaration starts being hard to hold in mind. The
+// threshold is fixed and documented so a reader can disagree with it knowingly.
+const hotspotComplexity = 8
+
+// maxHotspots bounds the list; a ranked list that never ends is not a ranking.
+const maxHotspots = 8
+
+// hotspots ranks declarations by complexity and churn together (AC17).
+//
+// Complexity alone names code that is hard to read; churn alone names code that
+// changes. Both together name the code where reading effort pays.
+func hotspots(structure analyze.Structure, churn map[string]int) []Hotspot {
+	var out []Hotspot
+	for _, m := range structure.Modules {
+		for _, d := range m.Decls {
+			if d.IsTest || d.Complexity < hotspotComplexity || churn[d.Path] == 0 {
+				continue
+			}
+			out = append(out, Hotspot{
+				Symbol:     d.Name,
+				Module:     m.Dir,
+				Path:       d.Path,
+				Line:       d.LineStart,
+				Complexity: d.Complexity,
+				Churn:      churn[d.Path],
+			})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		si := out[i].Complexity * out[i].Churn
+		sj := out[j].Complexity * out[j].Churn
+		if si != sj {
+			return si > sj
+		}
+		if out[i].Path != out[j].Path {
+			return out[i].Path < out[j].Path
+		}
+		return out[i].Line < out[j].Line
+	})
+	if len(out) > maxHotspots {
+		out = out[:maxHotspots]
 	}
 	return out
 }

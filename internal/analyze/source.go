@@ -23,6 +23,10 @@ type Declaration struct {
 	LineStart int // 1-based, inclusive
 	LineEnd   int
 	IsTest    bool
+	// Complexity is one plus the decision points in this declaration's own syntax.
+	// It describes the code, not the requirement: a complex function is not a met
+	// goal (AC17).
+	Complexity int
 }
 
 // declarationKinds are the node kinds that count as an implementation symbol.

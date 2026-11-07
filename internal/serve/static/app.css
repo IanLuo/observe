@@ -354,3 +354,14 @@ footer {
   color: var(--text-2);
 }
 .check .measure { margin-left: auto; font: 11px var(--sans); color: var(--text-2); }
+
+/* A cycle is a fact, not a verdict: it is marked, not coloured as failure. */
+.cycle {
+  margin: 6px 0 0;
+  padding: 4px 8px;
+  border-left: 3px solid var(--diff);
+  font: 11.5px var(--sans);
+  color: var(--text-2);
+}
+.outline .cycle-entry { font-size: 11px; }
+.outline .hotspots .outline-file { font-size: 11px; }

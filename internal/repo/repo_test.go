@@ -379,3 +379,39 @@ func TestFilesIncludesUntrackedAndRespectsIgnore(t *testing.T) {
 		t.Errorf("an ignored build output was read: %v", paths)
 	}
 }
+
+// Churn counts how many recent commits touched each path. It reads history only: a
+// session must leave the repository exactly as it found it.
+func TestChurnCountsCommitsPerPath(t *testing.T) {
+	dir := newRepo(t, map[string]string{
+		"a.go": "package a\n",
+		"b.go": "package a\n",
+	})
+
+	// The initial commit touched both files; then a.go twice and b.go once.
+	writeFile(t, dir, "a.go", "package a\n\n// one\n")
+	gitIn(t, dir, "commit", "-am", "one")
+	writeFile(t, dir, "a.go", "package a\n\n// one\n// two\n")
+	gitIn(t, dir, "commit", "-am", "two")
+	writeFile(t, dir, "b.go", "package a\n\n// b\n")
+	gitIn(t, dir, "commit", "-am", "three")
+
+	before := snapshotTree(t, dir)
+	r := openRepo(t, dir)
+	churn, err := r.Churn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if churn["a.go"] != 3 {
+		t.Errorf("a.go churn = %d, want 3 (initial plus two)", churn["a.go"])
+	}
+	if churn["b.go"] != 2 {
+		t.Errorf("b.go churn = %d, want 2 (initial plus one)", churn["b.go"])
+	}
+	if churn["missing.go"] != 0 {
+		t.Errorf("a path that never changed has churn %d", churn["missing.go"])
+	}
+	if got := snapshotTree(t, dir); !reflect.DeepEqual(got, before) {
+		t.Error("reading churn changed the repository")
+	}
+}

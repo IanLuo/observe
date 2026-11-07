@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"observe/internal/analyze"
 	"observe/internal/model"
 )
 
@@ -96,5 +97,43 @@ func TestFindingUsesTheWordsOfTheMeasure(t *testing.T) {
 		if got := finding(model.Check{Assertion: c.assertion, Status: c.status}); got != c.want {
 			t.Errorf("%q %q = %q, want %q", c.assertion, c.status, got, c.want)
 		}
+	}
+}
+
+// AC17: a hotspot is a declaration that is hard to read and often changed. Either
+// fact alone is not enough.
+func TestHotspotsNeedComplexityAndChurn(t *testing.T) {
+	structure := analyze.Structure{Modules: []analyze.Module{{
+		Dir: "internal/a",
+		Decls: []analyze.Declaration{
+			{Name: "HardAndHot", Path: "internal/a/a.go", LineStart: 10, Complexity: 12},
+			{Name: "HardAndCold", Path: "internal/a/b.go", LineStart: 20, Complexity: 30},
+			{Name: "SimpleAndHot", Path: "internal/a/c.go", LineStart: 30, Complexity: 1},
+		},
+	}}}
+	churn := map[string]int{"internal/a/a.go": 5, "internal/a/b.go": 0, "internal/a/c.go": 9}
+
+	got := hotspots(structure, churn)
+	if len(got) != 1 {
+		t.Fatalf("hotspots = %+v, want only the one that is both", got)
+	}
+	if got[0].Symbol != "HardAndHot" || got[0].Complexity != 12 || got[0].Churn != 5 {
+		t.Errorf("hotspot = %+v", got[0])
+	}
+}
+
+// AC16: a module in a cycle says so, so the map can point at it.
+func TestModulesCarryTheirCycle(t *testing.T) {
+	structure := analyze.Structure{
+		Modules: []analyze.Module{{Dir: "internal/a"}, {Dir: "internal/b"}, {Dir: "internal/c"}},
+		Cycles:  [][]string{{"internal/a", "internal/b"}},
+	}
+	got := structureOf(structure, nil)
+	flags := map[string]bool{}
+	for _, m := range got.Modules {
+		flags[m.Dir] = m.InCycle
+	}
+	if !flags["internal/a"] || !flags["internal/b"] || flags["internal/c"] {
+		t.Errorf("in-cycle flags = %v", flags)
 	}
 }

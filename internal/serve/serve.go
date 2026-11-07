@@ -31,11 +31,13 @@ import (
 
 // Analyzed is one analysis pass, as the presenter needs it.
 type Analyzed struct {
-	Repository  string
-	Snapshot    model.Snapshot
-	Baseline    model.SpecBaseline
-	Structure   analyze.Structure
-	Changes     []repo.Change
+	Repository string
+	Snapshot   model.Snapshot
+	Baseline   model.SpecBaseline
+	Structure  analyze.Structure
+	Changes    []repo.Change
+	// Churn counts recent commits touching each path, for hotspots.
+	Churn       map[string]int
 	Conflicts   []model.PromptConflict
 	PromptShown bool
 	Cache       Cache

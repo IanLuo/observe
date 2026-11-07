@@ -61,6 +61,11 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	// before the baseline branch: a repository with a missing or conflicting
 	// baseline can still be seen (AC7). Manifests join the pass because a workspace
 	// package name is what makes a bare import resolvable.
+	churn, churnErr := r.Churn()
+	if churnErr != nil {
+		churn = map[string]int{}
+	}
+
 	manifests, manifestDiags := readManifests(r, tracked)
 	scanned := analyze.AnalyzeSources(append(append([]analyze.File{}, sources...), manifests...))
 	declarations, structure := scanned.Declarations, scanned.Structure
@@ -85,6 +90,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 		Baseline:   baseline,
 		Structure:  structure,
 		Changes:    changes,
+		Churn:      churn,
 		Snapshot: model.Snapshot{
 			Fingerprint: fingerprint,
 			Generation:  fingerprint.Generation(),

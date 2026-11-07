@@ -22,7 +22,10 @@ import (
 // file is a diagnostic (system-design, Failure modes).
 type Structure struct {
 	Modules []Module
-	Edges   []ModuleEdge
+	// Cycles are the module import cycles, each as its members in sorted order. An
+	// empty slice means the analysis looked and found none (AC16).
+	Cycles [][]string
+	Edges  []ModuleEdge
 	// FileEdges are imports that resolve to one file here, including imports inside
 	// a single module: the module graph deliberately hides those, but the drill-down
 	// inside a module is exactly that picture.
@@ -53,6 +56,11 @@ type Module struct {
 	DependsOn []string      // module directories this one imports
 	Imports   []string      // imports that do not resolve to a module here
 	Truncated bool
+	// Coupling, from the module edges: how many modules this one imports (FanOut),
+	// how many import it (FanIn), and Instability = FanOut / (FanIn + FanOut).
+	FanIn       int
+	FanOut      int
+	Instability float64
 }
 
 // maxModuleDeclsPerFile keeps one large module from flooding the payload. The view
@@ -193,6 +201,9 @@ func structureFrom(files []File, scans map[string]fileScan) (Structure, []model.
 	// One drawing per pair of modules: a package imported through two paths
 	// (@app/domain and @app/domain/errors) is one dependency, not two lines.
 	out.Edges = uniqueEdges(out.Edges)
+
+	coupleModules(out.Modules, out.Edges)
+	out.Cycles = findCycles(out.Modules, out.Edges)
 	return out, diags
 }
 

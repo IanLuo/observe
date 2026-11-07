@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 )
@@ -245,6 +246,37 @@ type Change struct {
 //
 // Every git invocation here is a fixed read-only query. --no-ext-diff and
 // --no-textconv keep a repository's configured diff driver from running.
+// ChurnLimit bounds how much history the churn read touches. A hotspot is a
+// declaration that changed often and is hard to read; one year of commits, or the
+// most recent N when a project has more, says that without reading every commit.
+const ChurnLimit = 200
+
+// Churn counts, for each path, how many of the most recent commits touched it.
+//
+// It reads `git log` only: no checkout, no index write, no working-tree change. A
+// repository without commits answers with an empty map, which is the honest answer
+// rather than an error.
+func (r *Repo) Churn() (map[string]int, error) {
+	out, err := r.git("log", "-n", strconv.Itoa(ChurnLimit), "--name-only", "--no-renames", "--format=")
+	if err != nil {
+		// An empty repository has no HEAD to walk; that is not a failure to report.
+		if strings.Contains(err.Error(), "does not have any commits") {
+			return map[string]int{}, nil
+		}
+		return nil, err
+	}
+
+	counts := map[string]int{}
+	for _, line := range strings.Split(string(out), "\n") {
+		path := strings.TrimSpace(line)
+		if path == "" {
+			continue
+		}
+		counts[path]++
+	}
+	return counts, nil
+}
+
 func (r *Repo) Changes() ([]Change, string, []string, error) {
 	out, err := r.git("status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {

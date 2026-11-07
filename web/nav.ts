@@ -122,6 +122,55 @@ export function renderNav(root: HTMLElement, state: State, opts: NavOptions): vo
     root.append(rows);
   }
 
+  // Architecture is counted, not inferred: cycles from the import graph, hotspots
+  // from complexity and churn. Both are entry points, not a second diagram (AC16).
+  const cycles = state.structure?.cycles ?? [];
+  const hotspots = state.hotspots ?? [];
+  if (state.structure?.modules?.length) {
+    root.append(
+      el("div", { class: "section-head" }, [
+        el("h2", { text: "Architecture" }),
+        el("span", { class: "meta", text: `${cycles.length} cycle${cycles.length === 1 ? "" : "s"} · ${hotspots.length} hotspot${hotspots.length === 1 ? "" : "s"}` }),
+      ]),
+    );
+    if (cycles.length === 0) {
+      root.append(el("p", { class: "empty", text: "No import cycles among these modules." }));
+    } else {
+      const list = el("ul", { class: "outline cycles" });
+      for (const cycle of cycles) {
+        const item = el("li", {});
+        const entry = el("button", { class: "outline-file cycle-entry", text: cycle.join(" → "), title: cycle.join(" → ") });
+        entry.type = "button";
+        entry.addEventListener("click", () => {
+          opts.onSelect(moduleKey(cycle[0]));
+          opts.onFocus(cycle[0]);
+        });
+        item.append(entry);
+        list.append(item);
+      }
+      root.append(list);
+    }
+
+    if (hotspots.length > 0) {
+      const list = el("ul", { class: "outline hotspots" });
+      for (const spot of hotspots) {
+        const item = el("li", {});
+        const entry = el("button", {
+          class: "outline-file" + (opts.selected === fileKey(spot.path) ? " on" : ""),
+          title: `${spot.path}:${spot.line}`,
+        }, [
+          el("span", { text: `${spot.symbol} · c${spot.complexity} · ${spot.churn} commits` }),
+          el("span", { class: "muted", text: `${spot.path}:${spot.line}` }),
+        ]);
+        entry.type = "button";
+        entry.addEventListener("click", () => opts.onSelect(fileKey(spot.path)));
+        item.append(entry);
+        list.append(item);
+      }
+      root.append(list);
+    }
+  }
+
   // Changed source files are already in the outline above, marked as changed.
   // Only changes outside the source tree appear here, so no file is listed twice.
   const inModules = new Set(modules.flatMap((m) => m.files ?? []));

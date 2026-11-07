@@ -465,7 +465,9 @@ const visibleSymbols = 6;
 /** symbolText lists a file's symbols with their lines, counting the rest. */
 function symbolText(symbols: Symbol[]): string {
   if (symbols.length === 0) return "no declarations";
-  const shown = symbols.slice(0, visibleSymbols).map((s) => `${s.name}:${s.line}${s.test ? " (test)" : ""}`);
+  const shown = symbols
+    .slice(0, visibleSymbols)
+    .map((s) => `${s.name}:${s.line}${s.test ? " (test)" : ""}${s.complexity ? ` c${s.complexity}` : ""}`);
   const rest = symbols.length - shown.length;
   return shown.join("  ") + (rest > 0 ? `  +${rest} more` : "");
 }
@@ -570,6 +572,18 @@ export function renderModuleDetail(container: HTMLElement, state: State, dir: st
       text: `${module.files.length} files · ${module.symbols.filter((s) => !s.test).length} symbols · ${module.symbols.filter((s) => s.test).length} test symbols`,
     }),
   );
+
+  // Coupling is counted from the module edges: a fact about the construction, and
+  // the number a reader needs before deciding whether a change is local (AC16).
+  container.append(
+    el("p", {
+      class: "muted",
+      text: `imports ${module.fan_out} · imported by ${module.fan_in} · instability ${module.instability.toFixed(2)}`,
+    }),
+  );
+  if (module.in_cycle) {
+    container.append(el("p", { class: "cycle", text: "Part of an import cycle: this module is reachable from itself." }));
+  }
 
   const byFile = new Map<string, Symbol[]>();
   for (const symbol of module.symbols) {
