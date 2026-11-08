@@ -93,3 +93,71 @@ export function factory(): void {
 		t.Errorf("factory complexity = %d, want 1: the nested handler owns its branches", got["factory"])
 	}
 }
+
+// A number a reader cannot break down is a verdict without evidence. Each
+// declaration reports the constructs that made it complex, and the parts add up to
+// the whole: one path plus every counted branch.
+func TestComplexityReportsWhatMadeItComplex(t *testing.T) {
+	files := []File{
+		{Path: "internal/a/a.go", Body: []byte(`package a
+
+func Mixed(x int, s string) int {
+	if x > 1 && s != "" {
+		return 1
+	}
+	if x > 2 {
+		return 2
+	}
+	if x > 3 {
+		return 3
+	}
+	switch x {
+	case 1:
+		return 4
+	case 2:
+		return 5
+	}
+	for i := 0; i < x && i < 9; i++ {
+		if i == 3 {
+			return i
+		}
+	}
+	return 0
+}
+`)},
+	}
+
+	decls, diags := Declarations(files)
+	if len(diags) != 0 {
+		t.Fatalf("unexpected diagnostics: %+v", diags)
+	}
+	var got Declaration
+	for _, d := range decls {
+		if d.Name == "Mixed" {
+			got = d
+		}
+	}
+	if got.Complexity == 0 {
+		t.Fatalf("Mixed not found in %+v", decls)
+	}
+
+	counts := map[string]int{}
+	sum := 1
+	for _, part := range got.Decisions {
+		if part.Count < 1 {
+			t.Errorf("%q reports %d, and a reported construct must have happened", part.Label, part.Count)
+		}
+		counts[part.Label] += part.Count
+		sum += part.Count
+	}
+	if sum != got.Complexity {
+		t.Errorf("parts add up to %d, complexity says %d: %+v", sum, got.Complexity, got.Decisions)
+	}
+	// if ×3, if ×1, case ×2, for ×1, && ×2.
+	want := map[string]int{"if": 4, "case": 2, "for": 1, "&&": 2}
+	for label, n := range want {
+		if counts[label] != n {
+			t.Errorf("%s counted %d, want %d (all: %+v)", label, counts[label], n, got.Decisions)
+		}
+	}
+}

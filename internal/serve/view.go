@@ -80,8 +80,18 @@ type Symbol struct {
 	IsTest bool   `json:"test,omitempty"`
 	// Complexity is one plus the branch points in the declaration (AC17).
 	Complexity int `json:"complexity"`
+	// Decisions are the constructs that made up that number, biggest part first.
+	Decisions []Decision `json:"decisions,omitempty"`
 	// Churn is how many recent commits touched this file.
 	Churn int `json:"churn,omitempty"`
+}
+
+// Decision is one counted construct and how often it appears. The parts add up to
+// the complexity minus the single path every declaration has, so a reader can check
+// the number instead of trusting it.
+type Decision struct {
+	Label string `json:"label"`
+	Count int    `json:"count"`
 }
 
 // Flow is one route and what it can reach (AC19). It is derived from source, not
@@ -139,12 +149,13 @@ type SchemaReference struct {
 // Hotspot is a declaration that is both hard to read and often changed: the two
 // facts together say where reading effort goes (AC17).
 type Hotspot struct {
-	Symbol     string `json:"symbol"`
-	Module     string `json:"module"`
-	Path       string `json:"path"`
-	Line       int    `json:"line"`
-	Complexity int    `json:"complexity"`
-	Churn      int    `json:"churn"`
+	Symbol     string     `json:"symbol"`
+	Module     string     `json:"module"`
+	Path       string     `json:"path"`
+	Line       int        `json:"line"`
+	Complexity int        `json:"complexity"`
+	Decisions  []Decision `json:"decisions,omitempty"`
+	Churn      int        `json:"churn"`
 }
 
 // Edge is one relation between two files or modules. Kind is "import" or
@@ -422,6 +433,7 @@ func structureOf(structure analyze.Structure, churn map[string]int) Structure {
 				Line:       d.LineStart,
 				IsTest:     d.IsTest,
 				Complexity: d.Complexity,
+				Decisions:  decisionsOf(d.Decisions),
 				Churn:      churn[d.Path],
 			}
 		}
@@ -492,6 +504,18 @@ func schemaOf(in analyze.Schema) Schema {
 // threshold is fixed and documented so a reader can disagree with it knowingly.
 const hotspotComplexity = 8
 
+// decisionsOf maps the analyzer's counted constructs onto the wire.
+func decisionsOf(in []analyze.DecisionCount) []Decision {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]Decision, len(in))
+	for i, d := range in {
+		out[i] = Decision{Label: d.Label, Count: d.Count}
+	}
+	return out
+}
+
 // maxHotspots bounds the list; a ranked list that never ends is not a ranking.
 const maxHotspots = 8
 
@@ -512,6 +536,7 @@ func hotspots(structure analyze.Structure, churn map[string]int) []Hotspot {
 				Path:       d.Path,
 				Line:       d.LineStart,
 				Complexity: d.Complexity,
+				Decisions:  decisionsOf(d.Decisions),
 				Churn:      churn[d.Path],
 			})
 		}

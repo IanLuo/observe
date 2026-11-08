@@ -3,7 +3,15 @@
 
 import { Envelope, State } from "./types";
 import { dirOf, renderMap } from "./map";
-import { renderFileDetail, renderFlowDetail, renderMapBar, renderModuleDetail, renderProject, renderTableDetail } from "./project";
+import {
+  renderFileDetail,
+  renderFlowDetail,
+  renderHotspotDetail,
+  renderMapBar,
+  renderModuleDetail,
+  renderProject,
+  renderTableDetail,
+} from "./project";
 import { renderEr } from "./er";
 import { renderFlows } from "./flows";
 import { renderNav } from "./nav";
@@ -119,6 +127,7 @@ function render(): void {
   else if (view.selected?.startsWith("m:")) renderModuleDetail(nodes.detail, state, view.selected.slice(2));
   else if (view.selected?.startsWith("t:")) renderTableDetail(nodes.detail, state, view.selected.slice(2), handlers.onSelect);
   else if (view.selected?.startsWith("r:")) renderFlowDetail(nodes.detail, state, view.selected.slice(2), handlers.onSelect);
+  else if (view.selected?.startsWith("h:")) renderHotspotDetail(nodes.detail, state, view.selected.slice(2), handlers.onSelect);
   else renderDetail(nodes.detail, state, view.selected, view.showDiff, view.mode);
   renderConflicts(nodes.conflicts, state);
   renderFooter(nodes.footer, state);
@@ -172,6 +181,9 @@ function selectionExists(state: State, key: string): boolean {
   if (key.startsWith("f:")) return (state.diff.files ?? []).some((file) => file.path === value);
   if (key.startsWith("t:")) return (state.schema?.tables ?? []).some((table) => table.name === value);
   if (key.startsWith("r:")) return (state.flows ?? []).some((flow) => `${flow.method} ${flow.route}` === value);
+  if (key.startsWith("h:")) {
+    return (state.hotspots ?? []).some((spot) => `${spot.path}:${spot.line}` === value);
+  }
   if (key.startsWith("a:")) {
     return (state.goals ?? []).some((goal) =>
       (goal.checks ?? []).some((check) => (check.evidence ?? []).some((ref) => dirOf(ref.path) === value)),

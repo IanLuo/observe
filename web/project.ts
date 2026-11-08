@@ -481,6 +481,71 @@ function symbolText(symbols: Symbol[]): string {
 /** flowKey is the selection key for one route. */
 export const flowKey = (method: string, route: string): string => `r:${method} ${route}`;
 
+/** hotspotKey is the selection key for one hotspot declaration. */
+export const hotspotKey = (path: string, line: number): string => `h:${path}:${line}`;
+
+/**
+ * renderHotspotDetail explains the number instead of asserting it: the
+ * declaration, why the reader was sent here (both factors), and the constructs the
+ * complexity is made of, which add up to it.
+ */
+export function renderHotspotDetail(
+  container: HTMLElement,
+  state: State,
+  key: string,
+  onSelect?: (key: string) => void,
+): void {
+  const spot = (state.hotspots ?? []).find((s) => `${s.path}:${s.line}` === key);
+  clear(container);
+  container.scrollTop = 0;
+  if (!spot) {
+    container.append(el("p", { class: "empty", text: "That hotspot is no longer in this analysis." }));
+    return;
+  }
+
+  container.append(el("h2", { text: spot.symbol }));
+  const open = el("button", { class: "outline-file", text: `${spot.path}:${spot.line}` });
+  open.type = "button";
+  if (onSelect) open.addEventListener("click", () => onSelect(fileKey(spot.path)));
+  else open.disabled = true;
+  container.append(el("p", { class: "muted" }, [open]));
+
+  // Both factors, named. A reader who disagrees with the ranking should be able to
+  // see which factor put this declaration here.
+  const parts = spot.decisions ?? [];
+  const branches = parts.reduce((sum, part) => sum + part.count, 0);
+  container.append(
+    el("p", {
+      class: "hotspot-why",
+      text: `Complexity ${spot.complexity} = 1 path + ${branches} branches · ${spot.churn} commits touched this file`,
+    }),
+  );
+
+  if (parts.length === 0) {
+    container.append(el("p", { class: "empty", text: "No branch was counted for this declaration." }));
+    return;
+  }
+  container.append(el("h3", { text: "What makes it complex" }));
+  const list = el("ul", { class: "decisions" });
+  for (const part of parts) {
+    list.append(
+      el("li", {}, [
+        el("span", { class: "decision-label", text: part.label }),
+        el("span", { class: "decision-count", text: `×${part.count}` }),
+        el("span", { class: "decision-bar" }, [bar(part.count, branches)]),
+      ]),
+    );
+  }
+  container.append(list);
+}
+
+/** bar draws one part's share of the branches. */
+function bar(count: number, total: number): HTMLElement {
+  const fill = el("span", { class: "fill" });
+  fill.style.width = `${Math.round((count / total) * 100)}%`;
+  return fill;
+}
+
 /** tableKey is the selection key for one table of the data model. */
 export const tableKey = (name: string): string => "t:" + name;
 

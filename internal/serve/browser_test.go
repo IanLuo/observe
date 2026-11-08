@@ -322,3 +322,64 @@ func TestBrowserDrawsTheFlowMap(t *testing.T) {
 		}
 	}
 }
+
+// AC17 at the picture: a hotspot explains its number. The construct counts add up
+// to the complexity, so a reader can check the ranking instead of trusting it.
+func TestBrowserExplainsAHotspot(t *testing.T) {
+	dir := fixtureRepo(t, map[string]string{
+		".agents/specs/spec.md": specDoc,
+		"internal/app/render.go": `package app
+
+func Render(x int, s string) int {
+	if x > 1 && s != "" {
+		return 1
+	}
+	if x > 2 || s == "a" {
+		return 2
+	}
+	if x > 3 {
+		return 3
+	}
+	if x > 4 && s != "b" {
+		return 4
+	}
+	if x > 5 {
+		return 5
+	}
+	for i := 0; i < x && i < 9; i++ {
+		if i == 3 {
+			return i
+		}
+	}
+	return 0
+}
+`,
+	})
+	s := newServer(t, dir, "")
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	url, err := s.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+
+	ctx := browser(t)
+	visit(ctx, t, url)
+
+	waitFor(ctx, t, `document.querySelectorAll("#nav .outline.hotspots button").length > 0`)
+	click(ctx, t, `document.querySelector("#nav .outline.hotspots button").click()`)
+	waitFor(ctx, t, `(document.querySelector("#detail").textContent || "").includes("What makes it complex")`)
+
+	detail := text(ctx, t, `document.querySelector("#detail").textContent`)
+	for _, want := range []string{"Render", "internal/app/render.go", "1 path +", "commits touched this file"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("hotspot detail does not show %q: %q", want, first(detail, 400))
+		}
+	}
+	// The parts are the constructs, with their counts.
+	if !strings.Contains(detail, "if") || !strings.Contains(detail, "&&") {
+		t.Errorf("hotspot detail does not name the constructs: %q", first(detail, 400))
+	}
+}

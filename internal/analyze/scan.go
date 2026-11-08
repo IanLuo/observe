@@ -79,13 +79,15 @@ func declarationsIn(lang string, tree *ts.Tree, f File) []Declaration {
 	walk = func(n *ts.Node) {
 		if kinds[n.Kind()] {
 			if name := nameOf(n, f.Body); name != "" {
+				complexity, decisions := complexityOf(lang, n, f.Body)
 				decls = append(decls, Declaration{
 					Name:       name,
 					Path:       f.Path,
 					LineStart:  int(n.StartPosition().Row) + 1,
 					LineEnd:    int(n.EndPosition().Row) + 1,
 					IsTest:     isTestFile || isTestName(name),
-					Complexity: complexityOf(lang, n, f.Body),
+					Complexity: complexity,
+					Decisions:  decisions,
 				})
 			}
 		}

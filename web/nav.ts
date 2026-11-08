@@ -5,7 +5,7 @@
 // picture on the right, so the two panels never show the same thing twice.
 
 import { badge, checkStyle, clear, el } from "./dom";
-import { fileKey, flowKey, moduleKey, tableKey } from "./project";
+import { fileKey, flowKey, hotspotKey, moduleKey, tableKey } from "./project";
 
 /**
  * stopLabel renders the analyzer's stop code as a few words. The code decides the
@@ -183,14 +183,14 @@ export function renderNav(root: HTMLElement, state: State, opts: NavOptions): vo
       for (const spot of hotspots) {
         const item = el("li", {});
         const entry = el("button", {
-          class: "outline-file" + (opts.selected === fileKey(spot.path) ? " on" : ""),
+          class: "outline-file" + (opts.selected === hotspotKey(spot.path, spot.line) ? " on" : ""),
           title: `${spot.path}:${spot.line}`,
         }, [
           el("span", { text: `${spot.symbol} · c${spot.complexity} · ${spot.churn} commits` }),
           el("span", { class: "muted", text: `${spot.path}:${spot.line}` }),
         ]);
         entry.type = "button";
-        entry.addEventListener("click", () => opts.onSelect(fileKey(spot.path)));
+        entry.addEventListener("click", () => opts.onSelect(hotspotKey(spot.path, spot.line)));
         item.append(entry);
         list.append(item);
       }

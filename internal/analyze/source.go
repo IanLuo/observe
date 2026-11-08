@@ -27,6 +27,8 @@ type Declaration struct {
 	// It describes the code, not the requirement: a complex function is not a met
 	// goal (AC17).
 	Complexity int
+	// Decisions are the constructs that made up that number, biggest part first.
+	Decisions []DecisionCount
 }
 
 // declarationKinds are the node kinds that count as an implementation symbol.

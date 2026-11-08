@@ -78,12 +78,19 @@ export interface Symbol {
 }
 
 /** Hotspot is a declaration that is hard to read and often changed. */
+/** Decision is one counted construct and how often it appears (AC17). */
+export interface Decision {
+  label: string;
+  count: number;
+}
+
 export interface Hotspot {
   symbol: string;
   module: string;
   path: string;
   line: number;
   complexity: number;
+  decisions: Decision[] | null;
   churn: number;
 }
 

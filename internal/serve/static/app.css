@@ -390,6 +390,15 @@ footer {
 .er-column { font: 11px var(--mono); fill: var(--text-2); }
 .er-map .edge { stroke: var(--slate); stroke-width: 1.1; opacity: 0.5; }
 
+/* A hotspot says why it is one: the two factors, then the branches counted. */
+.hotspot-why { margin: 4px 0 10px; color: var(--text-2); font: 11.5px var(--mono); }
+ul.decisions { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+ul.decisions li { display: grid; grid-template-columns: 64px 40px 1fr; align-items: center; gap: 8px; }
+.decision-label { font: 11.5px var(--mono); color: var(--text); }
+.decision-count { font: 11.5px var(--mono); color: var(--text-2); text-align: right; }
+.decision-bar { height: 8px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.decision-bar .fill { display: block; height: 100%; background: var(--accent); opacity: 0.8; }
+
 /* A sub-head inside an outline section keeps two answers apart without adding a
    second level of navigation. */
 .section-head.sub { margin: 10px 0 2px; }
