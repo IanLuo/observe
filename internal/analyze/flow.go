@@ -72,12 +72,16 @@ type fileFacts struct {
 	// params maps a function name to its destructured parameter keys, so a server
 	// option passed by name can be traced to the constant the caller supplied.
 	params map[string]map[string]string
+	// order maps a function name to its plain parameters, in order, so a call site
+	// can bind one of them by position.
+	order map[string][]string
 }
 
 // constCall is `const x = factory({ ... })` in one file.
 type constCall struct {
 	callee string
 	args   map[string]string
+	pos    []string
 	scope  string
 	path   string
 }
@@ -90,6 +94,7 @@ type newBinding struct {
 type invocation struct {
 	callee string
 	args   map[string]string // object key to the identifier passed
+	pos    []string          // identifiers passed by position
 	scope  string            // the function the call sits in
 	path   string
 	line   int
@@ -99,6 +104,7 @@ type routeSite struct {
 	method string
 	path   string
 	line   int
+	scope  string     // the function that registers the route
 	calls  []callSite // member calls inside the handler
 }
 
@@ -114,6 +120,7 @@ type factoryDef struct {
 	path    string
 	line    int
 	params  map[string]string // local name → the argument key it came from
+	order   []string          // local names of positional parameters, in order
 	methods map[string]*methodDef
 	// indirect is set when the body binds a parameter to something other than a
 	// direct call on it, which the rules do not follow.
@@ -187,56 +194,71 @@ func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, fac
 		Name: "route", Detail: flow.Method + " " + route.path, Path: f.path, Line: route.line,
 	})
 
-	// The use case: a call on a local bound to a factory call in this file.
-	call, factoryCall, ok := useCaseCall(f, route)
-	if !ok {
-		flow.Unknown = "no call on a factory-built use case in this handler"
-		return flow
-	}
-	flow.Hops = append(flow.Hops, FlowHop{
-		Name: "use case", Detail: call.receiver + "." + call.method, Path: call.path, Line: call.line,
-	})
-
-	factory, ok := factories[factoryCall.callee]
-	if !ok {
-		flow.Unknown = "factory " + factoryCall.callee + " is not declared in this repository"
-		return flow
-	}
-	method, ok := factory.methods[call.method]
-	if !ok {
-		flow.Unknown = "factory " + factory.name + " returns no method " + call.method
-		return flow
-	}
-	if reason, ok := factory.indirect["store"]; ok {
-		flow.Unknown = "factory " + factory.name + " binds its store argument indirectly (" + reason + ")"
-		return flow
-	}
-
-	// The store method: a call on the parameter the factory received as "store".
-	var storeCall *callSite
-	for i, c := range method.calls {
-		if c.receiver == factory.params["store"] {
-			storeCall = &method.calls[i]
+	// A route can reach data two ways: through a use case built by a factory, or by
+	// calling a store itself. Both are followed; neither is assumed (AC19).
+	call, factoryName, viaUseCase := useCaseCall(f, route, factories)
+	var (
+		storeCall  *callSite
+		storeClass *classDef
+	)
+	if viaUseCase {
+		flow.Hops = append(flow.Hops, FlowHop{
+			Name: "use case", Detail: call.receiver + "." + call.method, Path: call.path, Line: call.line,
+		})
+		factory, ok := factories[factoryName]
+		if !ok {
+			flow.Unknown = "factory " + factoryName + " is not declared in this repository"
+			return flow
+		}
+		method, ok := factory.methods[call.method]
+		if !ok {
+			flow.Unknown = "factory " + factory.name + " returns no method " + call.method
+			return flow
+		}
+		storeCall, storeClass = storeCallIn(factory, method, facts, classes)
+		if storeCall == nil {
+			if reason := factory.indirectReason(); reason != "" {
+				flow.Unknown = "factory " + factory.name + " binds an argument indirectly (" + reason + ")"
+			} else {
+				flow.Unknown = "factory " + factory.name + "." + call.method + " calls no argument this reader can follow to a class"
+			}
+			return flow
+		}
+		if storeClass == nil {
+			flow.Unknown = "the store " + storeCall.receiver + " does not resolve to one class"
+			return flow
+		}
+	} else {
+		// A direct store call: `reads.listOrders(...)` on a parameter the composition
+		// root fills with a store class.
+		for i, c := range route.calls {
+			class, _ := resolveLocal(f, route.scope, c.receiver, facts, classes)
+			if class == nil {
+				continue
+			}
+			storeCall, storeClass = &route.calls[i], class
 			break
 		}
+		if storeCall == nil {
+			flow.Unknown = "no call in this handler reaches a factory-built use case or a store class"
+			return flow
+		}
 	}
-	if storeCall == nil {
-		flow.Unknown = "factory " + factory.name + "." + call.method + " does not call its store argument"
-		return flow
-	}
+
 	flow.Hops = append(flow.Hops, FlowHop{
-		Name: "store method", Detail: "store." + storeCall.method, Path: storeCall.path, Line: storeCall.line,
+		Name: "store method", Detail: storeCall.receiver + "." + storeCall.method,
+		Path: storeCall.path, Line: storeCall.line,
 	})
 
-	// The concrete class: a composition-root constant passed by name.
-	class, reason := resolveClass(f, factoryCall, facts, classes)
-	if class == nil {
-		flow.Unknown = reason
-		return flow
-	}
-	definition, ok := class.methods[storeCall.method]
+	definition, ok := storeClass.methods[storeCall.method]
 	if !ok {
-		flow.Unknown = "class " + class.name + " has no method " + storeCall.method
+		if viaUseCase {
+			// The hop above named a parameter; the method is looked up on the class the
+			// parameter resolved to, so this is the class, not the parameter.
+			flow.Unknown = "class " + storeClass.name + " has no method " + storeCall.method
+			return flow
+		}
+		flow.Unknown = "class " + storeClass.name + " has no method " + storeCall.method
 		return flow
 	}
 
@@ -248,87 +270,161 @@ func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, fac
 		seen[table] = true
 		flow.Table = append(flow.Table, table)
 		flow.Hops = append(flow.Hops, FlowHop{
-			Name: "table", Detail: table, Path: class.path, Line: definition.line,
+			Name: "table", Detail: table, Path: storeClass.path, Line: definition.line,
 		})
 	}
 	if len(flow.Table) == 0 {
-		flow.Unknown = "class " + class.name + "." + storeCall.method + " names no table in literal SQL"
+		flow.Unknown = "class " + storeClass.name + "." + storeCall.method + " names no table in literal SQL"
 	}
 	return flow
 }
 
-// useCaseCall finds the first call in the route handler on a local bound to a factory
-// call in the same file, and the factory call itself.
-func useCaseCall(f *fileFacts, route routeSite) (callSite, factoryBinding, bool) {
-	bindings := factoryBindingsOf(f)
-	for _, c := range route.calls {
-		if b, ok := bindings[c.receiver]; ok {
-			return c, b, true
+// storeCallIn finds the call in a factory method whose receiver is one of the
+// factory's arguments, and the class that argument resolves to.
+func storeCallIn(factory *factoryDef, method *methodDef, facts map[string]*fileFacts, classes map[string]*classDef) (*callSite, *classDef) {
+	// A method can call an argument that is not a store — a policy reader, a clock —
+	// before the one that runs SQL. The store is the call whose method names a
+	// table; a call that names none is only the answer when nothing else resolves.
+	var fallback *callSite
+	var fallbackClass *classDef
+	for i, c := range method.calls {
+		class, _ := resolveParameter(factory, c.receiver, facts, classes)
+		if class == nil {
+			continue
+		}
+		definition, ok := class.methods[c.method]
+		if !ok {
+			continue
+		}
+		if len(definition.tables) > 0 {
+			return &method.calls[i], class
+		}
+		if fallback == nil {
+			fallback, fallbackClass = &method.calls[i], class
 		}
 	}
-	return callSite{}, factoryBinding{}, false
+	return fallback, fallbackClass
 }
 
-// factoryBinding is `const x = createSomething({ ... })` in one file.
-type factoryBinding struct {
-	callee string
-	args   map[string]string
-	scope  string // the enclosing function, for the composition-root binding
-}
-
-func factoryBindingsOf(f *fileFacts) map[string]factoryBinding {
-	out := map[string]factoryBinding{}
-	for name, inv := range f.constCalls {
-		out[name] = factoryBinding{callee: inv.callee, args: inv.args, scope: inv.scope}
+// indirectReason reports the first argument the factory re-binds instead of calling.
+func (f *factoryDef) indirectReason() string {
+	for _, reason := range sortedKeys(f.indirect) {
+		return reason
 	}
-	return out
+	return ""
 }
 
-// resolveClass finds the class a store argument names.
-//
-// Two shapes count: a constant in this file assigned a `new` expression, and a
-// parameter of the enclosing function filled by a call site that passes a constant
-// assigned a `new` expression. Anything else does not identify a class.
-func resolveClass(f *fileFacts, binding factoryBinding, facts map[string]*fileFacts, classes map[string]*classDef) (*classDef, string) {
-	ident, ok := binding.args["store"]
-	if !ok {
-		return nil, "the factory receives no store argument at its call site"
+// resolveLocal resolves an identifier in a function body to a class: a constant
+// assigned a new expression here, or a parameter of that function filled by a call
+// site that passes such a constant.
+func resolveLocal(f *fileFacts, scope, local string, facts map[string]*fileFacts, classes map[string]*classDef) (*classDef, string) {
+	return classFromArgument(f, scope, local, facts, classes, 0)
+}
+
+// resolveParameter resolves a parameter of a factory to the class its call site
+// supplies, by key or by position.
+func resolveParameter(factory *factoryDef, local string, facts map[string]*fileFacts, classes map[string]*classDef) (*classDef, string) {
+	key, index := "", -1
+	for k, name := range factory.params {
+		if name == local {
+			key = k
+		}
+	}
+	for i, name := range factory.order {
+		if name == local && name != "" {
+			index = i
+		}
+	}
+	if key == "" && index < 0 {
+		return nil, "the receiver " + local + " is not an argument of " + factory.name
 	}
 
-	// A constant in this file: `const offers = new PostgresOfferStore(pool)`.
-	if nb, ok := f.newConsts[ident]; ok {
+	for _, path := range sortedKeys(facts) {
+		g := facts[path]
+		for _, inv := range g.invocations {
+			if inv.callee != factory.name {
+				continue
+			}
+			name := ""
+			if key != "" {
+				name = inv.args[key]
+			}
+			if name == "" && index >= 0 && index < len(inv.pos) {
+				name = inv.pos[index]
+			}
+			if name == "" {
+				continue
+			}
+			return classFromArgument(g, inv.scope, name, facts, classes, 0)
+		}
+	}
+	return nil, "no call site of " + factory.name + " supplies its argument " + local
+}
+
+// classFromArgument resolves an argument name to a class, following parameters one
+// function outward. The walk is bounded, and a name that stops resolving is a
+// reason, not a guess.
+func classFromArgument(f *fileFacts, scope, name string, facts map[string]*fileFacts, classes map[string]*classDef, depth int) (*classDef, string) {
+	if nb, ok := f.newConsts[name]; ok {
 		return classNamed(nb.class, classes)
 	}
+	if depth >= 3 {
+		return nil, "the argument " + name + " is more than three functions from a new expression"
+	}
 
-	// Otherwise the identifier is a parameter of the enclosing function. Its key is
-	// the option name the caller supplies, and the caller's argument is the constant.
-	key := "store"
-	if params, ok := f.params[binding.scope]; ok {
+	// The name may be a parameter of the function the call sits in. Its key is the
+	// option name that caller supplies.
+	key, index := "", -1
+	if params, ok := f.params[scope]; ok {
 		for k, local := range params {
-			if local == ident {
+			if local == name {
 				key = k
 			}
 		}
 	}
+	for i, local := range f.order[scope] {
+		if local == name && local != "" {
+			index = i
+		}
+	}
+	if scope == "" || (key == "" && index < 0) {
+		return nil, "the argument " + name + " is neither a new expression nor a parameter of " + scope
+	}
 	for _, path := range sortedKeys(facts) {
 		g := facts[path]
 		for _, inv := range g.invocations {
-			if inv.callee != binding.scope || binding.scope == "" {
+			if inv.callee != scope {
 				continue
 			}
-			name, ok := inv.args[key]
-			if !ok {
-				continue
+			next := ""
+			if key != "" {
+				next = inv.args[key]
 			}
-			if nb, ok := g.newConsts[name]; ok {
-				return classNamed(nb.class, classes)
+			if next == "" && index >= 0 && index < len(inv.pos) {
+				next = inv.pos[index]
 			}
-			// One more step would need a second parameter chain; stop and say so
-			// rather than guess which constant reaches this one.
-			return nil, "the store " + name + " passed into " + binding.scope + " is not a new expression in " + path
+			if next != "" {
+				return classFromArgument(g, inv.scope, next, facts, classes, depth+1)
+			}
 		}
 	}
-	return nil, "the store " + ident + " is not constructed with a new expression this reader can see"
+	return nil, "no call site of " + scope + " supplies its argument " + name
+}
+
+// useCaseCall finds the first call in the route handler on a local bound to a
+// factory declared in this repository, and names that factory.
+func useCaseCall(f *fileFacts, route routeSite, factories map[string]*factoryDef) (callSite, string, bool) {
+	for _, c := range route.calls {
+		bc, ok := f.constCalls[c.receiver]
+		if !ok {
+			continue
+		}
+		if _, declared := factories[bc.callee]; !declared {
+			continue
+		}
+		return c, bc.callee, true
+	}
+	return callSite{}, "", false
 }
 
 // classNamed returns a class by name, or the reason it cannot be followed.
@@ -351,6 +447,7 @@ func readFacts(f File, tree *ts.Tree) *fileFacts {
 		classes:    map[string]*classDef{},
 		constCalls: map[string]constCall{},
 		params:     map[string]map[string]string{},
+		order:      map[string][]string{},
 	}
 	var walk func(n *ts.Node, scope string)
 	walk = func(n *ts.Node, scope string) {
@@ -363,6 +460,7 @@ func readFacts(f File, tree *ts.Tree) *fileFacts {
 			if name != "" {
 				if params := field(n, "parameters", f.Body); params != nil {
 					facts.params[name] = destructuredParams(params, f.Body)
+					facts.order[name] = positionalParams(params, f.Body)
 				}
 			}
 			// Children only: walking this node again would read the same declaration
@@ -412,13 +510,18 @@ func readLexical(n *ts.Node, f File, scope string, facts *fileFacts) {
 			}
 		case "call_expression":
 			callee := fieldText(value, "function", f.Body)
-			args := objectArgs(value, f.Body)
-			if callee != "" && args != nil {
-				facts.constCalls[name] = constCall{callee: callee, args: args, scope: scope, path: f.Path}
-				facts.invocations = append(facts.invocations, invocation{
-					callee: callee, args: args, path: f.Path, line: int(value.StartPosition().Row) + 1,
-				})
+			if callee == "" {
+				continue
 			}
+			args, pos := callArguments(value, f.Body)
+			if args == nil && len(pos) == 0 {
+				continue
+			}
+			facts.constCalls[name] = constCall{callee: callee, args: args, pos: pos, scope: scope, path: f.Path}
+			facts.invocations = append(facts.invocations, invocation{
+				callee: callee, args: args, pos: pos, scope: scope, path: f.Path,
+				line: int(value.StartPosition().Row) + 1,
+			})
 		}
 	}
 }
@@ -430,10 +533,10 @@ func readCall(n *ts.Node, f File, scope string, facts *fileFacts) {
 		return
 	}
 	if fn.Kind() == "identifier" {
-		// createServer({ offers }) — the composition-root call.
-		if args := objectArgs(n, f.Body); args != nil {
+		// createServer({ offers }) or createStore(pool) — a composition-root call.
+		if args, pos := callArguments(n, f.Body); args != nil || len(pos) > 0 {
 			facts.invocations = append(facts.invocations, invocation{
-				callee: fn.Utf8Text(f.Body), args: args, scope: scope,
+				callee: fn.Utf8Text(f.Body), args: args, pos: pos, scope: scope,
 				path: f.Path, line: int(n.StartPosition().Row) + 1,
 			})
 		}
@@ -456,7 +559,7 @@ func readCall(n *ts.Node, f File, scope string, facts *fileFacts) {
 	if routeMethods[method] {
 		if path, ok := firstStringArg(args, f.Body); ok && strings.HasPrefix(path, "/") {
 			handler := args.NamedChild(uint(args.NamedChildCount()) - 1)
-			route := routeSite{method: method, path: path, line: int(n.StartPosition().Row) + 1}
+			route := routeSite{method: method, path: path, scope: scope, line: int(n.StartPosition().Row) + 1}
 			if handler != nil && handler.Kind() != "string" {
 				route.calls = memberCallsIn(handler, f)
 			}
@@ -464,14 +567,15 @@ func readCall(n *ts.Node, f File, scope string, facts *fileFacts) {
 		}
 	}
 
-	// createServer({ offers }) — an invocation whose object argument names constants.
-	if list := objectArgs(n, f.Body); list != nil {
+	// createServer({ offers }) — an invocation whose arguments name constants.
+	if args, pos := callArguments(n, f.Body); args != nil || len(pos) > 0 {
 		facts.invocations = append(facts.invocations, invocation{
-			callee: receiver + "." + method, args: list, scope: scope,
+			callee: receiver + "." + method, args: args, pos: pos, scope: scope,
 			path: f.Path, line: int(n.StartPosition().Row) + 1,
 		})
 		facts.invocations = append(facts.invocations, invocation{
-			callee: receiver, args: list, scope: scope, path: f.Path, line: int(n.StartPosition().Row) + 1,
+			callee: receiver, args: args, pos: pos, scope: scope,
+			path: f.Path, line: int(n.StartPosition().Row) + 1,
 		})
 	}
 }
@@ -521,6 +625,7 @@ func readFactory(n *ts.Node, f File, name string) *factoryDef {
 	}
 	if params := field(n, "parameters", f.Body); params != nil {
 		def.params = destructuredParams(params, f.Body)
+		def.order = positionalParams(params, f.Body)
 	}
 	declared := functionsIn(body, f)
 	for i := uint(0); i < returned.NamedChildCount(); i++ {
@@ -756,6 +861,50 @@ func fieldText(n *ts.Node, name string, src []byte) string {
 	return child.Utf8Text(src)
 }
 
+// callArguments reads a call's arguments: an object literal as key → identifier,
+// and the plain identifiers passed by position.
+func callArguments(call *ts.Node, src []byte) (map[string]string, []string) {
+	args := field(call, "arguments", src)
+	if args == nil {
+		return nil, nil
+	}
+	var pos []string
+	for i := uint(0); i < args.NamedChildCount(); i++ {
+		arg := args.NamedChild(i)
+		// Every argument keeps its slot, named or not: a skipped argument would
+		// shift the ones after it onto the wrong parameter, which invents a binding.
+		switch arg.Kind() {
+		case "object":
+			if m := objectOf(arg, src); m != nil {
+				return m, pos
+			}
+			pos = append(pos, "")
+		case "identifier":
+			pos = append(pos, arg.Utf8Text(src))
+		default:
+			pos = append(pos, "")
+		}
+	}
+	return nil, pos
+}
+
+// positionalParams lists the local names of a function's plain parameters, in order.
+func positionalParams(params *ts.Node, src []byte) []string {
+	var out []string
+	for i := uint(0); i < params.NamedChildCount(); i++ {
+		param := params.NamedChild(i)
+		switch param.Kind() {
+		case "required_parameter", "optional_parameter":
+			if pattern := field(param, "pattern", src); pattern != nil && pattern.Kind() == "identifier" {
+				out = append(out, pattern.Utf8Text(src))
+				continue
+			}
+			out = append(out, "")
+		}
+	}
+	return out
+}
+
 // objectArgs reads an object-literal argument as key → identifier.
 func objectArgs(call *ts.Node, src []byte) map[string]string {
 	args := field(call, "arguments", src)
@@ -763,28 +912,31 @@ func objectArgs(call *ts.Node, src []byte) map[string]string {
 		return nil
 	}
 	for i := uint(0); i < args.NamedChildCount(); i++ {
-		arg := args.NamedChild(i)
-		if arg.Kind() != "object" {
-			continue
+		if arg := args.NamedChild(i); arg.Kind() == "object" {
+			return objectOf(arg, src)
 		}
-		out := map[string]string{}
-		for j := uint(0); j < arg.NamedChildCount(); j++ {
-			entry := arg.NamedChild(j)
-			switch entry.Kind() {
-			case "shorthand_property_identifier":
-				name := entry.Utf8Text(src)
-				out[name] = name
-			case "pair":
-				key := fieldText(entry, "key", src)
-				value := field(entry, "value", src)
-				if key != "" && value != nil && value.Kind() == "identifier" {
-					out[key] = value.Utf8Text(src)
-				}
-			}
-		}
-		return out
 	}
 	return nil
+}
+
+// objectOf reads one object literal as key → identifier.
+func objectOf(arg *ts.Node, src []byte) map[string]string {
+	out := map[string]string{}
+	for j := uint(0); j < arg.NamedChildCount(); j++ {
+		entry := arg.NamedChild(j)
+		switch entry.Kind() {
+		case "shorthand_property_identifier":
+			name := entry.Utf8Text(src)
+			out[name] = name
+		case "pair":
+			key := fieldText(entry, "key", src)
+			value := field(entry, "value", src)
+			if key != "" && value != nil && value.Kind() == "identifier" {
+				out[key] = value.Utf8Text(src)
+			}
+		}
+	}
+	return out
 }
 
 // firstStringArg reads the first string or template argument as text.

@@ -189,3 +189,157 @@ func TestFlowReadsThePublishedObject(t *testing.T) {
 		t.Errorf("GET /v1/items tables = %v, want [sellable_item] (%s)", items.Table, items.Unknown)
 	}
 }
+
+// A factory can take its store by position. The parameter names decide nothing:
+// `createLedgerUseCases(ledger, policies)` binds its first argument, and the
+// argument's own shape says whether it is a class.
+func TestFlowBindsAPositionalFactoryArgument(t *testing.T) {
+	files := flowFixture()
+	files[1].Body = []byte(`import { createLedgerUseCases } from '@app/application/ledger';
+
+export function createServer({ ledger, policies }) {
+  const useCases = createLedgerUseCases(ledger, policies);
+  app.post('/v1/authorize', async (request) => useCases.authorize(request.body));
+}
+`)
+	files[2] = File{Path: "apps/api/src/ledger.ts", Body: []byte(`export function createLedgerUseCases(ledger, operationPolicies) {
+  return {
+    async authorize(input) {
+      operationPolicies.check(input);
+      return ledger.hold(input);
+    },
+  };
+}
+`)}
+	files[3] = File{Path: "apps/api/src/store.ts", Body: []byte(`export class PostgresOfferStore {
+  async hold(input) {
+    return client.query(` + "`INSERT INTO entitlement_hold (units) VALUES ($1)`" + `, [input.units]);
+  }
+}
+`)}
+	files[0].Body = []byte(`import { PostgresOfferStore } from './store.js';
+import { createServer } from './server.js';
+
+const ledger = new PostgresOfferStore(pool);
+
+createServer({ ledger, policies: new PolicyReader() });
+`)
+	flow := findFlow(t, RequestFlows(files), "POST", "/v1/authorize")
+	if len(flow.Table) != 1 || flow.Table[0] != "entitlement_hold" {
+		t.Fatalf("tables = %v, unknown = %q", flow.Table, flow.Unknown)
+	}
+	// The store call is the one on the class: `ledger.hold`, not `operationPolicies.check`.
+	if flow.Hops[2].Detail != "ledger.hold" {
+		t.Errorf("store hop = %q, want ledger.hold", flow.Hops[2].Detail)
+	}
+}
+
+// A handler that calls a store itself has no use case. The table is still reached,
+// and the hop list says so rather than inventing a use case.
+func TestFlowFollowsADirectStoreCall(t *testing.T) {
+	files := flowFixture()
+	files[1].Body = []byte(`export function createServer({ orders }) {
+  app.get('/v1/orders', async (request) => {
+    return orders.listOrders(request.query.limit);
+  });
+}
+`)
+	files[0].Body = []byte(`import { PostgresOrderStore } from './store.js';
+import { createServer } from './server.js';
+
+const orders = new PostgresOrderStore(pool);
+
+createServer({ orders });
+`)
+	files[3] = File{Path: "apps/api/src/store.ts", Body: []byte(`export class PostgresOrderStore {
+  async listOrders(limit) {
+    return client.query(` + "`SELECT id FROM commerce_order LIMIT $1`" + `, [limit]);
+  }
+}
+`)}
+	flow := findFlow(t, RequestFlows(files), "GET", "/v1/orders")
+	if len(flow.Table) != 1 || flow.Table[0] != "commerce_order" {
+		t.Fatalf("tables = %v, unknown = %q", flow.Table, flow.Unknown)
+	}
+	for _, hop := range flow.Hops {
+		if hop.Name == "use case" {
+			t.Errorf("a direct store call has no use case hop: %+v", flow.Hops)
+		}
+	}
+}
+
+// A call site can pass some arguments and not others. Each argument keeps its
+// position, so an argument this reader cannot name never slides the next one onto
+// the wrong parameter.
+func TestPositionalBindingSurvivesUnnamedArguments(t *testing.T) {
+	files := flowFixture()
+	files[1].Body = []byte(`import { createLedgerUseCases } from '@app/application/ledger';
+
+export function createServer({ ledger }) {
+  const useCases = createLedgerUseCases(new PolicyReader(pool), ledger);
+  app.post('/v1/authorize', async (request) => useCases.authorize(request.body));
+}
+`)
+	files[2] = File{Path: "apps/api/src/ledger.ts", Body: []byte(`export function createLedgerUseCases(operationPolicies, ledger) {
+  return {
+    async authorize(input) {
+      return ledger.hold(input);
+    },
+  };
+}
+`)}
+	files[3] = File{Path: "apps/api/src/store.ts", Body: []byte(`export class PostgresOfferStore {
+  async hold(input) {
+    return client.query(` + "`INSERT INTO entitlement_hold (units) VALUES ($1)`" + `, [input.units]);
+  }
+}
+`)}
+	files[0].Body = []byte(`import { PostgresOfferStore } from './store.js';
+import { createServer } from './server.js';
+
+const ledger = new PostgresOfferStore(pool);
+
+createServer({ ledger });
+`)
+	flow := findFlow(t, RequestFlows(files), "POST", "/v1/authorize")
+	if len(flow.Table) != 1 || flow.Table[0] != "entitlement_hold" {
+		t.Fatalf("tables = %v, unknown = %q", flow.Table, flow.Unknown)
+	}
+}
+
+// A use case can call an argument that is not a store before it reaches one: a
+// policy reader, a clock. The store is the call whose method names a table, not
+// whichever argument happens to be called first.
+func TestFlowPrefersTheArgumentThatNamesATable(t *testing.T) {
+	files := flowFixture()
+	files[1].Body = []byte(`import { createOfferUseCases } from '@app/application/offers';
+
+export function createServer({ offers, policies }) {
+  const offersUseCases = createOfferUseCases({ store: offers, policies });
+  app.post('/v1/plans', async (request) => offersUseCases.createPlan(request.body));
+}
+`)
+	files[2].Body = []byte(`export function createOfferUseCases({ store, policies }) {
+  return {
+    async createPlan(input) {
+      policies.check(input);
+      return store.createPlan(input);
+    },
+  };
+}
+`)
+	files[0].Body = []byte(`import { PostgresOfferStore, PolicyReader } from '@app/db';
+import { createServer } from './server.js';
+
+const offers = new PostgresOfferStore(pool);
+
+createServer({ offers, policies: new PolicyReader(pool) });
+`)
+	flow := findFlow(t, RequestFlows(files), "POST", "/v1/plans")
+	if len(flow.Table) != 1 || flow.Table[0] != "plan_version" {
+		t.Fatalf("tables = %v, unknown = %q", flow.Table, flow.Unknown)
+	}
+	if flow.Hops[2].Detail != "store.createPlan" {
+		t.Errorf("store hop = %q, want store.createPlan", flow.Hops[2].Detail)
+	}
+}
