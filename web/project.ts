@@ -473,6 +473,9 @@ function symbolText(symbols: Symbol[]): string {
   return shown.join("  ") + (rest > 0 ? `  +${rest} more` : "");
 }
 
+/** flowKey is the selection key for one route. */
+export const flowKey = (method: string, route: string): string => `r:${method} ${route}`;
+
 /** tableKey is the selection key for one table of the data model. */
 export const tableKey = (name: string): string => "t:" + name;
 
@@ -534,6 +537,62 @@ export function renderTableDetail(
     }
     container.append(refs);
   }
+}
+
+/**
+ * renderFlowDetail shows one route as the reader followed it: each hop with its
+ * file and line, then the tables it reached. A hop that could not be resolved says
+ * where the chain stopped, so an unresolved flow is never read as a short one
+ * (AC19).
+ */
+export function renderFlowDetail(
+  container: HTMLElement,
+  state: State,
+  key: string,
+  onSelect?: (key: string) => void,
+): void {
+  const flow = (state.flows ?? []).find((f) => `${f.method} ${f.route}` === key);
+  clear(container);
+  container.scrollTop = 0;
+  if (!flow) {
+    container.append(el("p", { class: "empty", text: "That route is no longer in the analysis." }));
+    return;
+  }
+
+  container.append(el("h2", { text: `${flow.method} ${flow.route}` }));
+  if (flow.unknown) {
+    container.append(el("p", { class: "cycle", text: `Not resolved · ${flow.unknown}` }));
+  }
+
+  const hops = el("ul", { class: "files hops" });
+  for (const hop of flow.hops ?? []) {
+    const item = el("li", {}, [el("div", { class: "file-path", text: `${hop.name}: ${hop.detail}` })]);
+    const open = el("button", { class: "outline-file", text: `${hop.path}:${hop.line}` });
+    open.type = "button";
+    if (onSelect) open.addEventListener("click", () => onSelect(fileKey(hop.path)));
+    else open.disabled = true;
+    item.append(open);
+    hops.append(item);
+  }
+  container.append(el("h3", { text: "Hops" }), hops);
+
+  container.append(el("h3", { text: "Tables" }));
+  const tables = flow.tables ?? [];
+  if (tables.length === 0) {
+    container.append(el("p", { class: "empty", text: "No table was reached, and none is claimed." }));
+    return;
+  }
+  const list = el("ul", { class: "files" });
+  for (const table of tables) {
+    const item = el("li", {});
+    const open = el("button", { class: "outline-file", text: table });
+    open.type = "button";
+    if (onSelect) open.addEventListener("click", () => onSelect(tableKey(table)));
+    else open.disabled = true;
+    item.append(open);
+    list.append(item);
+  }
+  container.append(list);
 }
 
 /**

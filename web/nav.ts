@@ -5,7 +5,7 @@
 // picture on the right, so the two panels never show the same thing twice.
 
 import { badge, checkStyle, clear, el } from "./dom";
-import { fileKey, moduleKey, tableKey } from "./project";
+import { fileKey, flowKey, moduleKey, tableKey } from "./project";
 import { State } from "./types";
 
 export interface NavOptions {
@@ -193,6 +193,34 @@ export function renderNav(root: HTMLElement, state: State, opts: NavOptions): vo
       });
       entry.type = "button";
       entry.addEventListener("click", () => opts.onSelect(tableKey(table.name)));
+      item.append(entry);
+      list.append(item);
+    }
+    root.append(list);
+  }
+
+  // Routes are the request flows: what a client can call and what it reaches
+  // (AC19). Shown after the data model, because a flow ends in a table.
+  const flows = state.flows ?? [];
+  if (flows.length > 0) {
+    const resolved = flows.filter((f) => (f.tables ?? []).length > 0).length;
+    root.append(
+      el("div", { class: "section-head" }, [
+        el("h2", { text: "Flows" }),
+        el("span", { class: "meta", text: `${flows.length} routes · ${resolved} reach a table` }),
+      ]),
+    );
+    const list = el("ul", { class: "outline flows" });
+    for (const flow of flows) {
+      const tables = flow.tables ?? [];
+      const item = el("li", {});
+      const entry = el("button", {
+        class: "outline-file" + (opts.selected === flowKey(flow.method, flow.route) ? " on" : ""),
+        title: `${flow.method} ${flow.route} · ${flow.path}:${flow.line}`,
+        text: `${flow.method} ${flow.route}${tables.length ? " · " + tables.join(", ") : " · no table"}`,
+      });
+      entry.type = "button";
+      entry.addEventListener("click", () => opts.onSelect(flowKey(flow.method, flow.route)));
       item.append(entry);
       list.append(item);
     }

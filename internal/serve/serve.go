@@ -39,7 +39,9 @@ type Analyzed struct {
 	// Churn counts recent commits touching each path, for hotspots.
 	Churn map[string]int
 	// Schema is the data model read from SQL migrations (AC18).
-	Schema      analyze.Schema
+	Schema analyze.Schema
+	// Flows are the routes and the tables they reach (AC19).
+	Flows       []analyze.Flow
 	Conflicts   []model.PromptConflict
 	PromptShown bool
 	Cache       Cache

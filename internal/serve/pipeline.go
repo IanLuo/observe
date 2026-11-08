@@ -75,6 +75,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	parseDiags = append(parseDiags, manifestDiags...)
 	parseDiags = append(parseDiags, migrationDiags...)
 	schema := analyze.ReadSchema(migrations)
+	flows := analyze.RequestFlows(append(append([]analyze.File{}, sources...), manifests...))
 	parseDiags = append(parseDiags, schema.Diagnostics...)
 	if names := summaryNames(skipped); names != "" {
 		parseDiags = append(parseDiags, model.Diagnostic{Op: "diff", Message: names})
@@ -96,6 +97,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 		Changes:    changes,
 		Churn:      churn,
 		Schema:     schema,
+		Flows:      flows,
 		Snapshot: model.Snapshot{
 			Fingerprint: fingerprint,
 			Generation:  fingerprint.Generation(),

@@ -132,6 +132,24 @@ export interface Cache {
   state: string;
 }
 
+/** Flow is one route and the tables it reaches (AC19). Derived, not verified. */
+export interface FlowHop {
+  name: string;
+  detail: string;
+  path: string;
+  line: number;
+}
+
+export interface Flow {
+  method: string;
+  route: string;
+  path: string;
+  line: number;
+  hops: FlowHop[] | null;
+  tables: string[] | null;
+  unknown?: string;
+}
+
 /** Schema is the data model the SQL migrations leave behind (AC18). */
 export interface SchemaTable {
   name: string;
@@ -170,6 +188,7 @@ export interface State {
   diff: { hash: string; files: DiffFile[] | null };
   structure: Structure;
   schema: Schema;
+  flows: Flow[] | null;
   goals: Goal[] | null;
   hotspots: Hotspot[] | null;
   prompt_conflicts: Conflict[] | null;

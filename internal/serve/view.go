@@ -31,6 +31,7 @@ type State struct {
 	Diff        Diff       `json:"diff"`
 	Structure   Structure  `json:"structure"`
 	Schema      Schema     `json:"schema"`
+	Flows       []Flow     `json:"flows"`
 	Goals       []Goal     `json:"goals"`
 	Hotspots    []Hotspot  `json:"hotspots"`
 	Conflicts   []Conflict `json:"prompt_conflicts"`
@@ -81,6 +82,27 @@ type Symbol struct {
 	Complexity int `json:"complexity"`
 	// Churn is how many recent commits touched this file.
 	Churn int `json:"churn,omitempty"`
+}
+
+// Flow is one route and what it can reach (AC19). It is derived from source, not
+// verified: a hop is a call this reader followed, and an unresolved hop names the
+// step that stopped it.
+type Flow struct {
+	Method  string    `json:"method"`
+	Route   string    `json:"route"`
+	Path    string    `json:"path"`
+	Line    int       `json:"line"`
+	Hops    []FlowHop `json:"hops"`
+	Tables  []string  `json:"tables"`
+	Unknown string    `json:"unknown,omitempty"`
+}
+
+// FlowHop is one step of a flow, with the location a reader can open.
+type FlowHop struct {
+	Name   string `json:"name"`
+	Detail string `json:"detail"`
+	Path   string `json:"path"`
+	Line   int    `json:"line"`
 }
 
 // Schema is the data model the SQL migrations leave behind (AC18). It is derived
@@ -352,6 +374,7 @@ func newState(a Analyzed, freshness string, failure *Failure, cache Cache) State
 		},
 		Structure:   structureOf(a.Structure, a.Churn),
 		Schema:      schemaOf(a.Schema),
+		Flows:       flowsOf(a.Flows),
 		Hotspots:    hotspots(a.Structure, a.Churn),
 		Goals:       goals(a.Snapshot.Assessments, freshness),
 		Diagnostics: messages(a.Snapshot.Diagnostics),
@@ -419,6 +442,24 @@ func structureOf(structure analyze.Structure, churn map[string]int) Structure {
 	}
 	for i, e := range structure.FileEdges {
 		out.FileEdges[i] = Edge{From: e.From, To: e.To, Kind: e.Kind, Import: e.Import, Symbol: e.Symbol}
+	}
+	return out
+}
+
+// flowsOf maps the derived request flows to the wire contract.
+func flowsOf(in []analyze.Flow) []Flow {
+	out := make([]Flow, len(in))
+	for i, f := range in {
+		flow := Flow{
+			Method: f.Method, Route: f.Route, Path: f.Path, Line: f.Line,
+			Tables:  append([]string{}, f.Table...),
+			Unknown: f.Unknown,
+			Hops:    make([]FlowHop, len(f.Hops)),
+		}
+		for j, h := range f.Hops {
+			flow.Hops[j] = FlowHop{Name: h.Name, Detail: h.Detail, Path: h.Path, Line: h.Line}
+		}
+		out[i] = flow
 	}
 	return out
 }

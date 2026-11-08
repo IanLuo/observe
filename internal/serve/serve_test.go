@@ -656,3 +656,44 @@ func TestPipelineReadsMigrationsAsTheDataModel(t *testing.T) {
 		}
 	}
 }
+
+// AC19: routes reach their tables through state, and an unresolved hop carries its
+// reason instead of a guessed table.
+func TestStateCarriesTheRequestFlow(t *testing.T) {
+	dir := fixtureRepo(t, map[string]string{
+		".agents/specs/spec.md":  specDoc,
+		"db/migrations/0001.sql": "CREATE TABLE plan_version (id uuid PRIMARY KEY);\n",
+		"apps/api/src/index.ts":  "import { Store } from './store.js';\nimport { createServer } from './server.js';\nconst store = new Store();\ncreateServer({ store });\n",
+		"apps/api/src/store.ts":  "export class Store {\n  async createPlan(input) {\n    return client.query(`INSERT INTO plan_version (name) VALUES ($1)`, [input.name]);\n  }\n}\n",
+		"apps/api/src/server.ts": "import { createPlans } from './plans.js';\nexport function createServer({ store }) {\n  const plans = createPlans({ store });\n  app.post('/v1/plans', async (request, reply) => plans.createPlan(request.body));\n  app.get('/v1/nothing', async () => 1);\n}\n",
+		"apps/api/src/plans.ts":  "export function createPlans({ store }) {\n  return { async createPlan(input) { return store.createPlan(input); } };\n}\n",
+	})
+	s := newServer(t, dir, "")
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	flows := state(t, s).Flows
+	if len(flows) != 2 {
+		t.Fatalf("flows = %+v, want two", flows)
+	}
+	var plan Flow
+	for _, f := range flows {
+		if f.Route == "/v1/plans" {
+			plan = f
+		}
+	}
+	if plan.Method != "POST" || len(plan.Tables) != 1 || plan.Tables[0] != "plan_version" {
+		t.Errorf("plan flow = %+v", plan)
+	}
+	if len(plan.Hops) < 4 {
+		t.Errorf("route, use case, store method, and table are not all present: %+v", plan.Hops)
+	}
+	for _, f := range flows {
+		if f.Route == "/v1/nothing" {
+			if len(f.Tables) != 0 || f.Unknown == "" {
+				t.Errorf("a route with no resolved table = %+v", f)
+			}
+		}
+	}
+}
