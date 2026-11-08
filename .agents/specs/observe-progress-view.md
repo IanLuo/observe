@@ -64,6 +64,7 @@
 - **AC15 — Check strength:** Given a goal whose checks are all passing, when the reader inspects it, then each check says what it measured and the goal says what those verdicts do not prove; presence of a name is never presented as behaviour.
 - **AC16 — Cycles and coupling:** Given a repository whose modules form a cycle, when the project is analysed, then the cycle is reported with the modules it passes through, and a repository with no cycle says so explicitly.
 - **AC17 — Complexity and hotspots:** Given declarations of differing complexity, when a file or module is inspected, then each declaration carries its cyclomatic complexity and the project ranks hotspots by complexity and churn together.
+- **AC18 — Data model:** Given SQL migration files that create tables and foreign keys, when the project is analysed, then each table shows its columns and the tables it references, and each relation names the migration file that declared it. Migrations apply in file-name order. A statement the reader does not model marks its table unknown and says why. No database is connected and no migration runs.
 - **AC14 — Invariants:** Given a check declared in a locked design or architecture document, when the overview loads, then it appears with its verdict under invariants, goal alignment availability is unchanged, and no invariant is presented as a goal.
 - **AC13 — Check verdicts:** Given a check declared in a locked spec, when the analysis runs, then it reports pass, violated, or unknown with source evidence, and an unknown verdict names its reason (missing subject, unusable file, unsupported language, no check defined).
 
@@ -131,6 +132,7 @@
 - **AC12 current cache only:** persistence tests for one replaceable current cache, schema/version and input fingerprint, no source-copy payload, deletion/rebuild, and repo-external storage; verify no historical snapshots are created.
 - **AC15 check strength:** fixture goals assert the measures they name and the gap sentence each verdict set produces: presence-only, dependency, test-covered, violated, unknown, and no check declared.
 - **AC16 cycles:** a fixture with a three-module cycle reports it with its members; a fixture without cycles reports none.
+- **AC18 data model:** fixture migrations assert a table built by `CREATE TABLE` plus `ADD COLUMN` and `ADD CONSTRAINT … FOREIGN KEY`, a dropped constraint removed, and an unmodelled `ALTER COLUMN` marking its table unknown with a reason.
 - **AC17 complexity:** fixture declarations with known decision counts assert their complexity, and a hotspot asserts both factors.
 - **AC14 invariants:** a fixture whose architecture document declares a check: the invariant appears with its verdict, goal alignment stays available, and a violated invariant never appears as a goal verdict.
 - **AC13 check verdicts:** fixture repositories carrying checks assert every verdict with its evidence: a passing check, a violation, unknown for a missing subject, unknown for an unusable file, unknown for an unsupported language, and a `not-imports` violation.
