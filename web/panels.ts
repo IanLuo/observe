@@ -119,13 +119,27 @@ export function renderFileDiff(root: HTMLElement, state: State, path: string, sh
   root.append(lines);
 }
 
-export function renderDetail(root: HTMLElement, state: State, selected: string | null, showDiff = true): void {
+export function renderDetail(
+  root: HTMLElement,
+  state: State,
+  selected: string | null,
+  showDiff = true,
+  mode: "project" | "goals" | "data" = "project",
+): void {
   clear(root);
   const goals = state.goals ?? [];
 
   if (!selected) {
     root.append(el("h2", { text: "Detail" }));
-    root.append(el("p", { class: "empty", text: "Select a module, a goal, an area, or a changed file." }));
+    root.append(
+      el("p", {
+        class: "empty",
+        text:
+          mode === "data"
+            ? "Select a table to see its columns, keys, and the migration that declared it."
+            : "Select a module, a goal, an area, or a changed file.",
+      }),
+    );
     root.append(overview(state));
     return;
   }

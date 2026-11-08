@@ -4,6 +4,7 @@
 import { Envelope, State } from "./types";
 import { dirOf, renderMap } from "./map";
 import { renderFileDetail, renderMapBar, renderModuleDetail, renderProject, renderTableDetail } from "./project";
+import { renderEr } from "./er";
 import { renderNav } from "./nav";
 import { installResize } from "./resize";
 import {
@@ -14,12 +15,15 @@ import {
   renderHeader,
 } from "./panels";
 
+/** MapMode is which picture the middle panel draws. */
+export type MapMode = "project" | "goals" | "data";
+
 const token = document.querySelector<HTMLMetaElement>("meta[name=observe-token]")?.content ?? "";
 
 interface View {
   state: State | null;
   /** mode decides which map is drawn; the project is the default view. */
-  mode: "project" | "goals";
+  mode: MapMode;
   /** focus is the module the map has drilled into; null is the whole project. */
   focus: string | null;
   selected: string | null;
@@ -31,7 +35,7 @@ interface View {
 
 const view: View = {
   state: null,
-  mode: "project",
+  mode: "project" as MapMode,
   focus: null,
   selected: null,
   expanded: new Set<string>(),
@@ -70,7 +74,7 @@ const handlers = {
   },
   onRefresh: () => void mutate("/api/refresh"),
   onClearCache: () => void mutate("/api/cache/clear"),
-  onMode: (mode: "project" | "goals") => {
+  onMode: (mode: MapMode) => {
     view.mode = mode;
     view.focus = null;
     view.selected = null;
@@ -113,7 +117,7 @@ function render(): void {
   if (view.selected?.startsWith("s:")) renderFileDetail(nodes.detail, state, view.selected.slice(2), view.showDiff);
   else if (view.selected?.startsWith("m:")) renderModuleDetail(nodes.detail, state, view.selected.slice(2));
   else if (view.selected?.startsWith("t:")) renderTableDetail(nodes.detail, state, view.selected.slice(2), handlers.onSelect);
-  else renderDetail(nodes.detail, state, view.selected, view.showDiff);
+  else renderDetail(nodes.detail, state, view.selected, view.showDiff, view.mode);
   renderConflicts(nodes.conflicts, state);
   renderFooter(nodes.footer, state);
 
@@ -127,7 +131,9 @@ function render(): void {
     onFocus: handlers.onFocus,
   });
 
-  if (view.mode === "project") {
+  if (view.mode === "data") {
+    renderEr(nodes.map, state, { selected: view.selected, onSelect: handlers.onSelect });
+  } else if (view.mode === "project") {
     renderProject(nodes.map, state, {
       selected: view.selected,
       focus: view.focus,

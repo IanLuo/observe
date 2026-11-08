@@ -220,3 +220,42 @@ func first(s string, n int) string {
 	}
 	return s[:n] + "…"
 }
+
+// AC18: the data model is a picture in the page, drawn from migrations, and a table
+// drills into the columns and the migration that declared it.
+func TestBrowserDrawsTheDataModelFromMigrations(t *testing.T) {
+	dir := fixtureRepo(t, map[string]string{
+		".agents/specs/spec.md":  specDoc,
+		"db/migrations/0001.sql": "CREATE TABLE creator (id uuid PRIMARY KEY);\nCREATE TABLE offer (id uuid PRIMARY KEY, creator_id uuid REFERENCES creator(id));\n",
+		"db/migrations/0002.sql": "ALTER TABLE offer ALTER COLUMN id TYPE text;\n",
+		"internal/repo/repo.go":  "package repo\n\nfunc Open() {}\n",
+	})
+	s := newServer(t, dir, "")
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	url, err := s.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+
+	ctx := browser(t)
+	visit(ctx, t, url)
+
+	click(ctx, t, `Array.from(document.querySelectorAll("button.mode")).find(b => b.textContent.trim() === "Data").click()`)
+	waitFor(ctx, t, `document.querySelectorAll("g.er-table").length === 2`)
+
+	// A table the reader could not fully model is marked, never silently complete.
+	waitFor(ctx, t, `document.querySelectorAll("g.er-table.partial").length === 1`)
+
+	click(ctx, t, `Array.from(document.querySelectorAll("g.er-table")).find(g => (g.textContent || "").startsWith("offer")).dispatchEvent(new MouseEvent("click", { bubbles: true }))`)
+	waitFor(ctx, t, `(document.querySelector("#detail").textContent || "").includes("creator_id")`)
+
+	detail := text(ctx, t, `document.querySelector("#detail").textContent`)
+	for _, want := range []string{"creator.id", "db/migrations/0001.sql", "ALTER COLUMN"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("table detail does not show %q: %q", want, first(detail, 400))
+		}
+	}
+}

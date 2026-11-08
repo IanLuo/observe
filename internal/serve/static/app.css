@@ -374,3 +374,18 @@ footer {
   align-items: flex-start;
   gap: 1px;
 }
+
+/* The data-model map: a second construction beside the module map. A table the
+   reader could not fully model is dashed, because a missing relation must not read
+   as an absent one. */
+.er-map { display: block; width: 100%; height: auto; }
+.er-table { cursor: pointer; }
+.er-box { fill: var(--panel); stroke: var(--slate); stroke-width: 1.5; }
+.er-table.partial .er-box { stroke-dasharray: 5 4; }
+.er-table:hover .er-box { stroke-width: 2; }
+.er-table.selected .er-box { stroke: var(--accent); stroke-width: 3; }
+.er-table:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.er-rule { stroke: var(--border); stroke-width: 1; }
+.er-table .module-name { font: 12px var(--mono); }
+.er-column { font: 11px var(--mono); fill: var(--text-2); }
+.er-map .edge { stroke: var(--slate); stroke-width: 1.1; opacity: 0.5; }

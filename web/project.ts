@@ -9,6 +9,7 @@
 import { clear, el, svgEl } from "./dom";
 import { renderFileDiff } from "./panels";
 import { Edge, Module, State, Symbol } from "./types";
+import type { MapMode } from "./main";
 
 /** moduleKey is the selection key for a module node. */
 export const moduleKey = (dir: string): string => "m:" + dir;
@@ -19,9 +20,9 @@ export interface ProjectOptions {
   focus: string | null;
   onSelect: (key: string | null) => void;
   onFocus: (dir: string | null) => void;
-  /** onMode switches between the project map and the goal map. */
-  mode: "project" | "goals";
-  onMode: (mode: "project" | "goals") => void;
+  /** onMode switches between the project map, the goal map, and the data model. */
+  mode: MapMode;
+  onMode: (mode: MapMode) => void;
 }
 
 /** fileKey is the selection key for one source file inside a module. */
@@ -346,7 +347,7 @@ function fileNode(
  */
 export function renderMapBar(
   container: HTMLElement,
-  opts: { mode: "project" | "goals"; focus: string | null; onMode: (mode: "project" | "goals") => void; onFocus: (dir: string | null) => void },
+  opts: { mode: MapMode; focus: string | null; onMode: (mode: MapMode) => void; onFocus: (dir: string | null) => void },
 ): void {
   clear(container);
   const project = el("button", { class: "crumb" + (opts.focus ? "" : " on"), text: "Project" });
@@ -444,9 +445,9 @@ function legend(modules: Module[], edgeCount: number): HTMLElement {
 }
 
 /** toggle switches between the project map and the goal map. */
-export function toggle(opts: { mode: "project" | "goals"; onMode: (mode: "project" | "goals") => void }): HTMLElement {
+export function toggle(opts: { mode: MapMode; onMode: (mode: MapMode) => void }): HTMLElement {
   const group = el("div", { class: "modes", role: "group", ariaLabel: "Map view" });
-  const button = (mode: "project" | "goals", label: string): HTMLElement => {
+  const button = (mode: MapMode, label: string): HTMLElement => {
     const b = el("button", {
       class: "mode" + (opts.mode === mode ? " on" : ""),
       text: label,
@@ -455,7 +456,7 @@ export function toggle(opts: { mode: "project" | "goals"; onMode: (mode: "projec
     b.addEventListener("click", () => opts.onMode(mode));
     return b;
   };
-  group.append(button("project", "Project"), button("goals", "Goals"));
+  group.append(button("project", "Project"), button("goals", "Goals"), button("data", "Data"));
   return group;
 }
 
