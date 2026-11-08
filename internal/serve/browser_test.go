@@ -259,3 +259,59 @@ func TestBrowserDrawsTheDataModelFromMigrations(t *testing.T) {
 		}
 	}
 }
+
+// AC19 at the picture: the flow map draws an edge only where the reader followed
+// the whole chain, and both ends open their own detail. A route with no edge stays
+// counted, never silently dropped.
+func TestBrowserDrawsTheFlowMap(t *testing.T) {
+	dir := fixtureRepo(t, map[string]string{
+		".agents/specs/spec.md":  specDoc,
+		"db/migrations/0001.sql": "CREATE TABLE plan_version (id uuid PRIMARY KEY, name text NOT NULL);\n",
+		"apps/api/src/index.ts":  "import { Store } from './store.js';\nimport { createServer } from './server.js';\n\nconst store = new Store();\n\ncreateServer({ store });\n",
+		"apps/api/src/store.ts":  "export class Store {\n  async createPlan(input) {\n    return client.query(`INSERT INTO plan_version (name) VALUES ($1)`, [input.name]);\n  }\n}\n",
+		"apps/api/src/plans.ts":  "export function createPlans({ store }) {\n  return { async createPlan(input) { return store.createPlan(input); } };\n}\n",
+		"apps/api/src/server.ts": "import { createPlans } from './plans.js';\n\nexport function createServer({ store }) {\n  const plans = createPlans({ store });\n  app.post('/v1/plans', async (request) => plans.createPlan(request.body));\n  app.get('/v1/health', async () => 'ok');\n}\n",
+	})
+	s := newServer(t, dir, "")
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	url, err := s.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+
+	ctx := browser(t)
+	visit(ctx, t, url)
+
+	// The outline lists both routes, including the one with no table.
+	waitFor(ctx, t, `(document.querySelector("#nav").textContent || "").includes("/v1/health")`)
+
+	click(ctx, t, `Array.from(document.querySelectorAll("button.mode")).find(b => b.textContent.trim() === "Flows").click()`)
+	waitFor(ctx, t, `document.querySelectorAll("g.flow-node.route").length === 1`)
+	waitFor(ctx, t, `document.querySelectorAll("g.flow-node.table").length === 1`)
+	waitFor(ctx, t, `document.querySelectorAll("path.flow-edge").length === 1`)
+
+	// The route with no table is counted in the footer, not erased.
+	foot := text(ctx, t, `document.querySelector(".map-foot").textContent`)
+	for _, want := range []string{"1 of 2 routes", "other 1"} {
+		if !strings.Contains(foot, want) {
+			t.Errorf("footer does not say %q: %q", want, foot)
+		}
+	}
+
+	// A table node opens the data model's own detail.
+	click(ctx, t, `document.querySelector("g.flow-node.table").dispatchEvent(new MouseEvent("click", { bubbles: true }))`)
+	waitFor(ctx, t, `(document.querySelector("#detail").textContent || "").includes("plan_version")`)
+
+	// A route node opens the flow's hops.
+	click(ctx, t, `document.querySelector("g.flow-node.route").dispatchEvent(new MouseEvent("click", { bubbles: true }))`)
+	waitFor(ctx, t, `(document.querySelector("#detail").textContent || "").includes("store method")`)
+	detail := text(ctx, t, `document.querySelector("#detail").textContent`)
+	for _, want := range []string{"POST /v1/plans", "use case", "store.createPlan", "apps/api/src/store.ts"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("flow detail does not show %q: %q", want, first(detail, 400))
+		}
+	}
+}

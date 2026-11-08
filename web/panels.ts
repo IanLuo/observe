@@ -124,7 +124,7 @@ export function renderDetail(
   state: State,
   selected: string | null,
   showDiff = true,
-  mode: "project" | "goals" | "data" = "project",
+  mode: "project" | "goals" | "data" | "flows" = "project",
 ): void {
   clear(root);
   const goals = state.goals ?? [];
@@ -137,7 +137,9 @@ export function renderDetail(
         text:
           mode === "data"
             ? "Select a table to see its columns, keys, and the migration that declared it."
-            : "Select a module, a goal, an area, or a changed file.",
+            : mode === "flows"
+              ? "Select a route to see the hops it took, or a table to see which routes reach it."
+              : "Select a module, a goal, an area, or a changed file.",
       }),
     );
     root.append(overview(state));

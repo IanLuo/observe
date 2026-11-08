@@ -5,6 +5,7 @@ import { Envelope, State } from "./types";
 import { dirOf, renderMap } from "./map";
 import { renderFileDetail, renderFlowDetail, renderMapBar, renderModuleDetail, renderProject, renderTableDetail } from "./project";
 import { renderEr } from "./er";
+import { renderFlows } from "./flows";
 import { renderNav } from "./nav";
 import { installResize } from "./resize";
 import {
@@ -16,7 +17,7 @@ import {
 } from "./panels";
 
 /** MapMode is which picture the middle panel draws. */
-export type MapMode = "project" | "goals" | "data";
+export type MapMode = "project" | "goals" | "data" | "flows";
 
 const token = document.querySelector<HTMLMetaElement>("meta[name=observe-token]")?.content ?? "";
 
@@ -134,6 +135,8 @@ function render(): void {
 
   if (view.mode === "data") {
     renderEr(nodes.map, state, { selected: view.selected, onSelect: handlers.onSelect });
+  } else if (view.mode === "flows") {
+    renderFlows(nodes.map, state, { selected: view.selected, onSelect: handlers.onSelect });
   } else if (view.mode === "project") {
     renderProject(nodes.map, state, {
       selected: view.selected,

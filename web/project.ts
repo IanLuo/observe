@@ -456,7 +456,12 @@ export function toggle(opts: { mode: MapMode; onMode: (mode: MapMode) => void })
     b.addEventListener("click", () => opts.onMode(mode));
     return b;
   };
-  group.append(button("project", "Project"), button("goals", "Goals"), button("data", "Data"));
+  group.append(
+    button("project", "Project"),
+    button("goals", "Goals"),
+    button("data", "Data"),
+    button("flows", "Flows"),
+  );
   return group;
 }
 
@@ -494,7 +499,27 @@ export function renderTableDetail(
   clear(container);
   container.scrollTop = 0;
   if (!table) {
-    container.append(el("p", { class: "empty", text: "That table is no longer in the data model." }));
+    // A route can name a table that no migration declares: a table the analysis
+    // reached, and a table it knows the shape of, are different claims.
+    const routes = (state.flows ?? []).filter((f) => (f.tables ?? []).includes(name));
+    container.append(el("h2", { text: name }));
+    if (routes.length === 0) {
+      container.append(el("p", { class: "empty", text: "That table is no longer in the data model." }));
+      return;
+    }
+    container.append(
+      el("p", { class: "empty", text: `No migration in this repository declares ${name}, so its columns are not known here. It is reached from the routes below.` }),
+    );
+    const list = el("ul", { class: "files" });
+    for (const flow of routes) {
+      const item = el("li", {});
+      const open = el("button", { class: "outline-file", text: `${flow.method} ${flow.route}` });
+      open.type = "button";
+      if (onSelect) open.addEventListener("click", () => onSelect(flowKey(flow.method, flow.route)));
+      item.append(open);
+      list.append(item);
+    }
+    container.append(el("h3", { text: "Reached from" }), list);
     return;
   }
 
