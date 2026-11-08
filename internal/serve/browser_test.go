@@ -285,8 +285,15 @@ func TestBrowserDrawsTheFlowMap(t *testing.T) {
 	ctx := browser(t)
 	visit(ctx, t, url)
 
-	// The outline lists both routes, including the one with no table.
+	// The outline separates the routes that reach a table from the ones that stop,
+	// and names the stop from the analyzer's code, not from English.
 	waitFor(ctx, t, `(document.querySelector("#nav").textContent || "").includes("/v1/health")`)
+	nav := text(ctx, t, `document.querySelector("#nav").textContent`)
+	for _, want := range []string{"Reaches a table", "Stops before a table", "no store call"} {
+		if !strings.Contains(nav, want) {
+			t.Errorf("outline does not show %q: %q", want, first(nav, 500))
+		}
+	}
 
 	click(ctx, t, `Array.from(document.querySelectorAll("button.mode")).find(b => b.textContent.trim() === "Flows").click()`)
 	waitFor(ctx, t, `document.querySelectorAll("g.flow-node.route").length === 1`)

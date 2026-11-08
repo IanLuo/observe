@@ -148,6 +148,8 @@ export interface Flow {
   hops: FlowHop[] | null;
   tables: string[] | null;
   unknown?: string;
+  /** stop is where the reader stopped: a code, so the outline groups without parsing. */
+  stop?: string;
 }
 
 /** Schema is the data model the SQL migrations leave behind (AC18). */

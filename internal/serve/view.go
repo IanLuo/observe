@@ -95,6 +95,7 @@ type Flow struct {
 	Hops    []FlowHop `json:"hops"`
 	Tables  []string  `json:"tables"`
 	Unknown string    `json:"unknown,omitempty"`
+	Stop    string    `json:"stop,omitempty"`
 }
 
 // FlowHop is one step of a flow, with the location a reader can open.
@@ -454,6 +455,7 @@ func flowsOf(in []analyze.Flow) []Flow {
 			Method: f.Method, Route: f.Route, Path: f.Path, Line: f.Line,
 			Tables:  append([]string{}, f.Table...),
 			Unknown: f.Unknown,
+			Stop:    f.Stop,
 			Hops:    make([]FlowHop, len(f.Hops)),
 		}
 		for j, h := range f.Hops {

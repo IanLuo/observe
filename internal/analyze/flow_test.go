@@ -363,3 +363,66 @@ createServer({ offers: new PostgresOfferStore(pool) });
 		t.Errorf("unknown = %q, want it to name the expression argument", flow.Unknown)
 	}
 }
+
+// A stop is a code as well as a sentence. The reader groups flows by the code, so
+// the vocabulary is fixed here rather than parsed out of English later.
+func TestFlowStopsCarryACode(t *testing.T) {
+	cases := []struct {
+		name string
+		file int
+		body string
+		want string
+		look string
+	}{
+		{"no store call", 1, `export function createServer({ store }) {
+  app.get('/v1/ping', async () => 'ok');
+}
+`, StopNoStoreCall, "GET /v1/ping"},
+		{"expression argument", 0, "", StopFactoryArgument, ""},
+		{"published object without the method", 2, `export function createOfferUseCases({ store }) {
+  return { async listItems() { return store.listItems(); } };
+}
+`, StopFactoryMethod, ""},
+		{"no literal table", 3, `export class PostgresOfferStore {
+  async createPlan(input) {
+    return client.query('INSERT INTO ' + input.table + ' VALUES ($1)', [1]);
+  }
+  async listItems() {
+    return client.query('SELECT id FROM sellable_item', [1]);
+  }
+}
+`, StopNoTable, ""},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			files := flowFixture()
+			if c.file == 0 {
+				files[0].Body = []byte(`import { PostgresOfferStore } from '@app/db';
+import { createServer } from './server.js';
+
+createServer({ offers: new PostgresOfferStore(pool) });
+`)
+			} else if c.body != "" {
+				files[c.file].Body = []byte(c.body)
+			}
+			method, route := "POST", "/v1/plans"
+			if c.look != "" {
+				method, route = "GET", "/v1/ping"
+			}
+			flow := findFlow(t, RequestFlows(files), method, route)
+			if flow.Stop != c.want {
+				t.Errorf("stop = %q, want %q (%s)", flow.Stop, c.want, flow.Unknown)
+			}
+			if flow.Unknown == "" {
+				t.Error("a stopped flow carries no sentence")
+			}
+		})
+	}
+
+	// A resolved flow carries no stop code.
+	flow := findFlow(t, RequestFlows(flowFixture()), "POST", "/v1/plans")
+	if flow.Stop != "" {
+		t.Errorf("a resolved flow has stop %q", flow.Stop)
+	}
+}

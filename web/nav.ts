@@ -6,6 +6,33 @@
 
 import { badge, checkStyle, clear, el } from "./dom";
 import { fileKey, flowKey, moduleKey, tableKey } from "./project";
+
+/**
+ * stopLabel renders the analyzer's stop code as a few words. The code decides the
+ * words; the analyzer never ships prose the reader has to cut up.
+ */
+function stopLabel(stop?: string): string {
+  switch (stop) {
+    case "no-store-call":
+      return "no store call";
+    case "factory-unknown":
+      return "factory not found";
+    case "factory-method":
+      return "factory has no such method";
+    case "factory-indirect":
+      return "argument re-bound";
+    case "factory-argument":
+      return "argument is an expression";
+    case "store-class":
+      return "store is not one class";
+    case "store-method":
+      return "class has no such method";
+    case "no-table":
+      return "SQL names no table";
+    default:
+      return "no table";
+  }
+}
 import { State } from "./types";
 
 export interface NavOptions {
@@ -203,28 +230,41 @@ export function renderNav(root: HTMLElement, state: State, opts: NavOptions): vo
   // (AC19). Shown after the data model, because a flow ends in a table.
   const flows = state.flows ?? [];
   if (flows.length > 0) {
-    const resolved = flows.filter((f) => (f.tables ?? []).length > 0).length;
+    const resolved = flows.filter((f) => (f.tables ?? []).length > 0);
+    const stopped = flows.filter((f) => (f.tables ?? []).length === 0);
     root.append(
       el("div", { class: "section-head" }, [
         el("h2", { text: "Flows" }),
-        el("span", { class: "meta", text: `${flows.length} routes · ${resolved} reach a table` }),
+        el("span", { class: "meta", text: `${flows.length} routes · ${resolved.length} reach a table` }),
       ]),
     );
-    const list = el("ul", { class: "outline flows" });
-    for (const flow of flows) {
-      const tables = flow.tables ?? [];
-      const item = el("li", {});
-      const entry = el("button", {
-        class: "outline-file" + (opts.selected === flowKey(flow.method, flow.route) ? " on" : ""),
-        title: `${flow.method} ${flow.route} · ${flow.path}:${flow.line}`,
-        text: `${flow.method} ${flow.route}${tables.length ? " · " + tables.join(", ") : " · no table"}`,
-      });
-      entry.type = "button";
-      entry.addEventListener("click", () => opts.onSelect(flowKey(flow.method, flow.route)));
-      item.append(entry);
-      list.append(item);
-    }
-    root.append(list);
+
+    // Two groups, because a route that reaches a table and one that stops are
+    // different answers. The stop label is a code the analyzer emits; the full
+    // sentence stays in the title.
+    const group = (title: string, list: typeof flows): void => {
+      const head = el("div", { class: "section-head sub" }, [
+        el("h3", { text: title }),
+        el("span", { class: "meta", text: String(list.length) }),
+      ]);
+      root.append(head);
+      const items = el("ul", { class: "outline flows" });
+      for (const flow of list) {
+        const tables = flow.tables ?? [];
+        const entry = el("button", {
+          class: "outline-file" + (opts.selected === flowKey(flow.method, flow.route) ? " on" : ""),
+          title: `${flow.method} ${flow.route} · ${flow.path}:${flow.line}${flow.unknown ? " · " + flow.unknown : ""}`,
+          text: `${flow.method} ${flow.route} · ${tables.length ? tables.join(", ") : stopLabel(flow.stop)}`,
+        });
+        entry.type = "button";
+        entry.addEventListener("click", () => opts.onSelect(flowKey(flow.method, flow.route)));
+        items.append(el("li", {}, [entry]));
+      }
+      root.append(items);
+    };
+
+    if (resolved.length > 0) group("Reaches a table", resolved);
+    if (stopped.length > 0) group("Stops before a table", stopped);
   }
 
   // Changed source files are already in the outline above, marked as changed.

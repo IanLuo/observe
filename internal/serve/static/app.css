@@ -390,6 +390,11 @@ footer {
 .er-column { font: 11px var(--mono); fill: var(--text-2); }
 .er-map .edge { stroke: var(--slate); stroke-width: 1.1; opacity: 0.5; }
 
+/* A sub-head inside an outline section keeps two answers apart without adding a
+   second level of navigation. */
+.section-head.sub { margin: 10px 0 2px; }
+.section-head.sub h3 { margin: 0; font: 11px var(--mono); text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); }
+
 /* The flow map: a route on the left, a table on the right, an edge only where the
    whole chain was followed. An edge that is absent is the point, so the box, not
    the edge, carries the colour. */

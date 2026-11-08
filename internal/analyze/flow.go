@@ -35,6 +35,9 @@ type Flow struct {
 	Table []string
 	// Unknown names the step that stopped the chain, or is empty when it completed.
 	Unknown string
+	// Stop is the machine-readable reason the flow stopped, so a reader can group
+	// flows without parsing English. Empty when a table was reached.
+	Stop string
 }
 
 // FlowHop is one step, with the source location a reader can open.
@@ -188,6 +191,19 @@ func RequestFlows(files []File) []Flow {
 	return flows
 }
 
+// Stop codes name where a flow stopped. They are vocabulary, not prose: the reader
+// groups and colours flows by them, and the sentence in Unknown says the detail.
+const (
+	StopFactoryUnknown  = "factory-unknown"  // the factory is not declared here
+	StopFactoryMethod   = "factory-method"   // the factory publishes no such method
+	StopFactoryIndirect = "factory-indirect" // the factory re-binds its argument
+	StopFactoryArgument = "factory-argument" // the argument does not resolve to a class
+	StopStoreClass      = "store-class"      // the receiver is not one class
+	StopStoreMethod     = "store-method"     // the class has no such method
+	StopNoStoreCall     = "no-store-call"    // the handler calls no store or use case
+	StopNoTable         = "no-table"         // the method names no table in literal SQL
+)
+
 // resolveFlow follows one route through the bindings, appending a hop per step.
 func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, factories map[string]*factoryDef, classes map[string]*classDef) Flow {
 	flow := Flow{Method: strings.ToUpper(route.method), Route: route.path, Path: f.path, Line: route.line}
@@ -208,11 +224,13 @@ func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, fac
 		})
 		factory, ok := factories[factoryName]
 		if !ok {
+			flow.Stop = StopFactoryUnknown
 			flow.Unknown = "factory " + factoryName + " is not declared in this repository"
 			return flow
 		}
 		method, ok := factory.methods[call.method]
 		if !ok {
+			flow.Stop = StopFactoryMethod
 			flow.Unknown = "factory " + factory.name + " returns no method " + call.method
 			return flow
 		}
@@ -221,16 +239,20 @@ func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, fac
 		if storeCall == nil {
 			switch {
 			case factory.indirectReason() != "":
+				flow.Stop = StopFactoryIndirect
 				flow.Unknown = "factory " + factory.name + " binds an argument indirectly (" + factory.indirectReason() + ")"
 			case reason != "":
+				flow.Stop = StopFactoryArgument
 				flow.Unknown = reason
 			default:
+				flow.Stop = StopFactoryArgument
 				flow.Unknown = "factory " + factory.name + "." + call.method +
 					" calls no argument that resolves to a class"
 			}
 			return flow
 		}
 		if storeClass == nil {
+			flow.Stop = StopStoreClass
 			flow.Unknown = "the store " + storeCall.receiver + " does not resolve to one class"
 			return flow
 		}
@@ -246,6 +268,7 @@ func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, fac
 			break
 		}
 		if storeCall == nil {
+			flow.Stop = StopNoStoreCall
 			flow.Unknown = "no call in this handler reaches a factory-built use case or a store class"
 			return flow
 		}
@@ -261,9 +284,11 @@ func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, fac
 		if viaUseCase {
 			// The hop above named a parameter; the method is looked up on the class the
 			// parameter resolved to, so this is the class, not the parameter.
+			flow.Stop = StopStoreMethod
 			flow.Unknown = "class " + storeClass.name + " has no method " + storeCall.method
 			return flow
 		}
+		flow.Stop = StopStoreMethod
 		flow.Unknown = "class " + storeClass.name + " has no method " + storeCall.method
 		return flow
 	}
@@ -280,6 +305,7 @@ func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, fac
 		})
 	}
 	if len(flow.Table) == 0 {
+		flow.Stop = StopNoTable
 		flow.Unknown = "class " + storeClass.name + "." + storeCall.method + " names no table in literal SQL"
 	}
 	return flow
