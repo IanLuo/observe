@@ -17,6 +17,7 @@ package analyze
 import (
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 
 	ts "github.com/tree-sitter/go-tree-sitter"
@@ -215,12 +216,17 @@ func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, fac
 			flow.Unknown = "factory " + factory.name + " returns no method " + call.method
 			return flow
 		}
-		storeCall, storeClass = storeCallIn(factory, method, facts, classes)
+		var reason string
+		storeCall, storeClass, reason = storeCallIn(factory, method, facts, classes)
 		if storeCall == nil {
-			if reason := factory.indirectReason(); reason != "" {
-				flow.Unknown = "factory " + factory.name + " binds an argument indirectly (" + reason + ")"
-			} else {
-				flow.Unknown = "factory " + factory.name + "." + call.method + " calls no argument this reader can follow to a class"
+			switch {
+			case factory.indirectReason() != "":
+				flow.Unknown = "factory " + factory.name + " binds an argument indirectly (" + factory.indirectReason() + ")"
+			case reason != "":
+				flow.Unknown = reason
+			default:
+				flow.Unknown = "factory " + factory.name + "." + call.method +
+					" calls no argument that resolves to a class"
 			}
 			return flow
 		}
@@ -281,15 +287,24 @@ func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, fac
 
 // storeCallIn finds the call in a factory method whose receiver is one of the
 // factory's arguments, and the class that argument resolves to.
-func storeCallIn(factory *factoryDef, method *methodDef, facts map[string]*fileFacts, classes map[string]*classDef) (*callSite, *classDef) {
+func storeCallIn(factory *factoryDef, method *methodDef, facts map[string]*fileFacts, classes map[string]*classDef) (*callSite, *classDef, string) {
 	// A method can call an argument that is not a store — a policy reader, a clock —
 	// before the one that runs SQL. The store is the call whose method names a
 	// table; a call that names none is only the answer when nothing else resolves.
 	var fallback *callSite
 	var fallbackClass *classDef
+	reason := ""
 	for i, c := range method.calls {
-		class, _ := resolveParameter(factory, c.receiver, facts, classes)
+		// Only a call on one of the factory's own arguments can be the store. A call
+		// on a helper in the same body names no argument, so it explains nothing.
+		if !factory.isParameter(c.receiver) {
+			continue
+		}
+		class, why := resolveParameter(factory, c.receiver, facts, classes)
 		if class == nil {
+			if reason == "" {
+				reason = why
+			}
 			continue
 		}
 		definition, ok := class.methods[c.method]
@@ -297,13 +312,28 @@ func storeCallIn(factory *factoryDef, method *methodDef, facts map[string]*fileF
 			continue
 		}
 		if len(definition.tables) > 0 {
-			return &method.calls[i], class
+			return &method.calls[i], class, ""
 		}
 		if fallback == nil {
 			fallback, fallbackClass = &method.calls[i], class
 		}
 	}
-	return fallback, fallbackClass
+	return fallback, fallbackClass, reason
+}
+
+// isParameter reports whether a name is one of the factory's arguments.
+func (f *factoryDef) isParameter(local string) bool {
+	for _, name := range f.params {
+		if name == local {
+			return true
+		}
+	}
+	for _, name := range f.order {
+		if name != "" && name == local {
+			return true
+		}
+	}
+	return false
 }
 
 // indirectReason reports the first argument the factory re-binds instead of calling.
@@ -353,7 +383,9 @@ func resolveParameter(factory *factoryDef, local string, facts map[string]*fileF
 				name = inv.pos[index]
 			}
 			if name == "" {
-				continue
+				return nil, "the call site at " + path + ":" + strconv.Itoa(inv.line) +
+					" passes an expression for " + factory.name + "'s argument " + local +
+					", not a name that resolves to a class"
 			}
 			return classFromArgument(g, inv.scope, name, facts, classes, 0)
 		}
@@ -387,15 +419,21 @@ func classFromArgument(f *fileFacts, scope, name string, facts map[string]*fileF
 			index = i
 		}
 	}
-	if scope == "" || (key == "" && index < 0) {
+	if scope == "" {
+		// A call at file scope: there is no enclosing function to be a parameter of.
+		return nil, "the argument " + name + " in " + f.path + " is not a new expression"
+	}
+	if key == "" && index < 0 {
 		return nil, "the argument " + name + " is neither a new expression nor a parameter of " + scope
 	}
+	sawCall := false
 	for _, path := range sortedKeys(facts) {
 		g := facts[path]
 		for _, inv := range g.invocations {
 			if inv.callee != scope {
 				continue
 			}
+			sawCall = true
 			next := ""
 			if key != "" {
 				next = inv.args[key]
@@ -407,6 +445,13 @@ func classFromArgument(f *fileFacts, scope, name string, facts map[string]*fileF
 				return classFromArgument(g, inv.scope, next, facts, classes, depth+1)
 			}
 		}
+	}
+	if sawCall {
+		// The call site exists and leaves this argument as an expression: a `new`
+		// written in place, a call, anything that is not a name. That is a decision,
+		// not a gap — no class is claimed from it.
+		return nil, "the call site of " + scope + " passes an expression for its argument " +
+			name + ", not a name that resolves to a class"
 	}
 	return nil, "no call site of " + scope + " supplies its argument " + name
 }

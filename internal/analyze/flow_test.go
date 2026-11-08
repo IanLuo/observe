@@ -343,3 +343,23 @@ createServer({ offers, policies: new PolicyReader(pool) });
 		t.Errorf("store hop = %q, want store.createPlan", flow.Hops[2].Detail)
 	}
 }
+
+// A call site can leave an argument as an expression instead of a name:
+// createServer(new PostgresLedger(pool)). The flow stops there, and the reason
+// names that expression so the reader knows what to look at. Decided: this shape
+// is not a binding.
+func TestFlowNamesAnExpressionArgumentAsTheReason(t *testing.T) {
+	files := flowFixture()
+	files[0].Body = []byte(`import { PostgresOfferStore } from '@app/db';
+import { createServer } from './server.js';
+
+createServer({ offers: new PostgresOfferStore(pool) });
+`)
+	flow := findFlow(t, RequestFlows(files), "POST", "/v1/plans")
+	if len(flow.Table) != 0 {
+		t.Fatalf("tables = %v, want none", flow.Table)
+	}
+	if !strings.Contains(flow.Unknown, "passes an expression") || !strings.Contains(flow.Unknown, "offers") {
+		t.Errorf("unknown = %q, want it to name the expression argument", flow.Unknown)
+	}
+}
