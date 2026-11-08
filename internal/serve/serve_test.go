@@ -605,3 +605,54 @@ func TestPipelineResolvesWorkspaceImports(t *testing.T) {
 	}
 	t.Fatalf("no workspace edge from db to domain: %+v", st.Structure.Edges)
 }
+
+// AC18: migrations become the data model, a migration edit makes the cache stale,
+// and an unmodelled statement shows as unknown with its reason.
+func TestPipelineReadsMigrationsAsTheDataModel(t *testing.T) {
+	dir := fixtureRepo(t, map[string]string{
+		".agents/specs/spec.md":           specDoc,
+		"packages/db/migrations/0001.sql": "CREATE TABLE creator (id uuid PRIMARY KEY);\nCREATE TABLE offer (id uuid PRIMARY KEY, creator_id uuid REFERENCES creator(id));\n",
+		"packages/db/migrations/0002.sql": "ALTER TABLE offer ALTER COLUMN id TYPE text;\n",
+	})
+	cachePath := filepath.Join(t.TempDir(), "cache", "analysis.db")
+	s := newServer(t, dir, cachePath)
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	schema := state(t, s).Schema
+	if len(schema.Tables) != 2 {
+		t.Fatalf("tables = %+v, want two", schema.Tables)
+	}
+	var offer SchemaTable
+	for _, tb := range schema.Tables {
+		if tb.Name == "offer" {
+			offer = tb
+		}
+	}
+	if len(offer.References) != 1 || offer.References[0].To != "creator.id" ||
+		offer.References[0].Migration != "packages/db/migrations/0001.sql" {
+		t.Errorf("offer references = %+v", offer.References)
+	}
+	if !strings.Contains(offer.Unknown, "ALTER COLUMN") {
+		t.Errorf("offer unknown = %q, want the unmodelled statement named", offer.Unknown)
+	}
+
+	// Editing a migration is an input change: the cache must not reuse the old shape.
+	write(t, dir, "packages/db/migrations/0001.sql",
+		"CREATE TABLE creator (id uuid PRIMARY KEY);\nCREATE TABLE offer (id uuid PRIMARY KEY);\n")
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := state(t, s).Cache.State; got != "saved" {
+		t.Fatalf("a migration edit reused the cache: %q", got)
+	}
+	if n := len(state(t, s).Schema.Tables); n != 2 {
+		t.Fatalf("tables after edit = %d", n)
+	}
+	for _, tb := range state(t, s).Schema.Tables {
+		if tb.Name == "offer" && len(tb.References) != 0 {
+			t.Errorf("the removed reference is still shown: %+v", tb.References)
+		}
+	}
+}

@@ -65,7 +65,11 @@ func TestFingerprintChangesWithEveryInput(t *testing.T) {
 		"spec set":            func(in *FingerprintInput) { in.Specs = nil },
 		"source content":      func(in *FingerprintInput) { in.Sources[0].Body = []byte("package other") },
 		"source set":          func(in *FingerprintInput) { in.Sources = nil },
-		"cache schema":        func(in *FingerprintInput) { in.SchemaVersion = "cache/2" },
+		// A migration is schema input; an edit to it must stale the cache (AC18).
+		"migration content": func(in *FingerprintInput) {
+			in.Sources = append(in.Sources, File{Path: "db/0001.sql", Body: []byte("CREATE TABLE a (id int);")})
+		},
+		"cache schema": func(in *FingerprintInput) { in.SchemaVersion = "cache/2" },
 	}
 
 	for name, mutate := range mutations {

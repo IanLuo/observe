@@ -132,6 +132,32 @@ export interface Cache {
   state: string;
 }
 
+/** Schema is the data model the SQL migrations leave behind (AC18). */
+export interface SchemaTable {
+  name: string;
+  migration: string;
+  columns: SchemaColumn[];
+  references: SchemaReference[];
+  unknown?: string;
+}
+
+export interface SchemaColumn {
+  name: string;
+  type: string;
+  key?: boolean;
+}
+
+export interface SchemaReference {
+  constraint?: string;
+  from: string;
+  to: string;
+  migration: string;
+}
+
+export interface Schema {
+  tables: SchemaTable[] | null;
+}
+
 export interface State {
   repository: string;
   commit?: string;
@@ -143,6 +169,7 @@ export interface State {
   baseline: Baseline;
   diff: { hash: string; files: DiffFile[] | null };
   structure: Structure;
+  schema: Schema;
   goals: Goal[] | null;
   hotspots: Hotspot[] | null;
   prompt_conflicts: Conflict[] | null;

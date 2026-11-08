@@ -50,6 +50,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 	if err != nil {
 		return Analyzed{}, err
 	}
+	migrations, migrationDiags := readMigrations(r, tracked)
 
 	docs := make([]analyze.Doc, len(specs))
 	for i, s := range specs {
@@ -72,6 +73,9 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 
 	parseDiags := append(scanned.Diagnostics, sourceDiags...)
 	parseDiags = append(parseDiags, manifestDiags...)
+	parseDiags = append(parseDiags, migrationDiags...)
+	schema := analyze.ReadSchema(migrations)
+	parseDiags = append(parseDiags, schema.Diagnostics...)
 	if names := summaryNames(skipped); names != "" {
 		parseDiags = append(parseDiags, model.Diagnostic{Op: "diff", Message: names})
 	}
@@ -81,7 +85,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 		Commit:        commit,
 		DiffHash:      diffHash,
 		Specs:         specFiles(specs),
-		Sources:       sources,
+		Sources:       append(append([]analyze.File{}, sources...), migrations...),
 		SchemaVersion: store.SchemaVersion,
 	})
 
@@ -91,6 +95,7 @@ func (o Options) pipeline(ctx context.Context) (Analyzed, error) {
 		Structure:  structure,
 		Changes:    changes,
 		Churn:      churn,
+		Schema:     schema,
 		Snapshot: model.Snapshot{
 			Fingerprint: fingerprint,
 			Generation:  fingerprint.Generation(),
@@ -226,6 +231,28 @@ func readManifests(r *repo.Repo, tracked []string) ([]analyze.File, []model.Diag
 		body, err := r.ReadFile(p)
 		if err != nil {
 			diags = append(diags, model.Diagnostic{Op: "manifest", Path: p, Message: "unreadable: " + err.Error()})
+			continue
+		}
+		files = append(files, analyze.File{Path: p, Body: body})
+	}
+	return files, diags
+}
+
+// readMigrations reads the tracked SQL migrations. They are schema input, not
+// source: they never yield declarations or links (AC18). An unreadable one is a
+// diagnostic, not a missing table.
+func readMigrations(r *repo.Repo, tracked []string) ([]analyze.File, []model.Diagnostic) {
+	var (
+		files []analyze.File
+		diags []model.Diagnostic
+	)
+	for _, p := range tracked {
+		if path.Ext(p) != ".sql" || analyze.OutOfScope(p) {
+			continue
+		}
+		body, err := r.ReadFile(p)
+		if err != nil {
+			diags = append(diags, model.Diagnostic{Op: "schema", Path: p, Message: "unreadable: " + err.Error()})
 			continue
 		}
 		files = append(files, analyze.File{Path: p, Body: body})

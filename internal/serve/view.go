@@ -30,6 +30,7 @@ type State struct {
 	Baseline    Baseline   `json:"baseline"`
 	Diff        Diff       `json:"diff"`
 	Structure   Structure  `json:"structure"`
+	Schema      Schema     `json:"schema"`
 	Goals       []Goal     `json:"goals"`
 	Hotspots    []Hotspot  `json:"hotspots"`
 	Conflicts   []Conflict `json:"prompt_conflicts"`
@@ -80,6 +81,36 @@ type Symbol struct {
 	Complexity int `json:"complexity"`
 	// Churn is how many recent commits touched this file.
 	Churn int `json:"churn,omitempty"`
+}
+
+// Schema is the data model the SQL migrations leave behind (AC18). It is derived
+// from DDL, not from code: a table here is a statement a migration made.
+type Schema struct {
+	Tables []SchemaTable `json:"tables"`
+}
+
+// SchemaTable is one table. Unknown says why the reader could not model it.
+type SchemaTable struct {
+	Name       string            `json:"name"`
+	Migration  string            `json:"migration"`
+	Columns    []SchemaColumn    `json:"columns"`
+	References []SchemaReference `json:"references"`
+	Unknown    string            `json:"unknown,omitempty"`
+}
+
+// SchemaColumn is one column; Key marks a primary key column.
+type SchemaColumn struct {
+	Name string `json:"name"`
+	Type string `json:"type"`
+	Key  bool   `json:"key,omitempty"`
+}
+
+// SchemaReference is one foreign key and the migration that declared it.
+type SchemaReference struct {
+	Constraint string `json:"constraint,omitempty"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	Migration  string `json:"migration"`
 }
 
 // Hotspot is a declaration that is both hard to read and often changed: the two
@@ -320,6 +351,7 @@ func newState(a Analyzed, freshness string, failure *Failure, cache Cache) State
 			Files: diffFiles(a.Changes),
 		},
 		Structure:   structureOf(a.Structure, a.Churn),
+		Schema:      schemaOf(a.Schema),
 		Hotspots:    hotspots(a.Structure, a.Churn),
 		Goals:       goals(a.Snapshot.Assessments, freshness),
 		Diagnostics: messages(a.Snapshot.Diagnostics),
@@ -387,6 +419,28 @@ func structureOf(structure analyze.Structure, churn map[string]int) Structure {
 	}
 	for i, e := range structure.FileEdges {
 		out.FileEdges[i] = Edge{From: e.From, To: e.To, Kind: e.Kind, Import: e.Import, Symbol: e.Symbol}
+	}
+	return out
+}
+
+// schemaOf maps the derived data model to the wire contract.
+func schemaOf(in analyze.Schema) Schema {
+	out := Schema{Tables: make([]SchemaTable, len(in.Tables))}
+	for i, t := range in.Tables {
+		table := SchemaTable{
+			Name:       t.Name,
+			Migration:  t.Migration,
+			Columns:    make([]SchemaColumn, len(t.Columns)),
+			References: make([]SchemaReference, len(t.References)),
+			Unknown:    t.Unknown,
+		}
+		for j, c := range t.Columns {
+			table.Columns[j] = SchemaColumn{Name: c.Name, Type: c.Type, Key: c.Key}
+		}
+		for j, r := range t.References {
+			table.References[j] = SchemaReference{Constraint: r.Constraint, From: r.From, To: r.To, Migration: r.Migration}
+		}
+		out.Tables[i] = table
 	}
 	return out
 }

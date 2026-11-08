@@ -37,7 +37,9 @@ type Analyzed struct {
 	Structure  analyze.Structure
 	Changes    []repo.Change
 	// Churn counts recent commits touching each path, for hotspots.
-	Churn       map[string]int
+	Churn map[string]int
+	// Schema is the data model read from SQL migrations (AC18).
+	Schema      analyze.Schema
 	Conflicts   []model.PromptConflict
 	PromptShown bool
 	Cache       Cache

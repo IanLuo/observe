@@ -472,6 +472,69 @@ function symbolText(symbols: Symbol[]): string {
   return shown.join("  ") + (rest > 0 ? `  +${rest} more` : "");
 }
 
+/** tableKey is the selection key for one table of the data model. */
+export const tableKey = (name: string): string => "t:" + name;
+
+/**
+ * renderTableDetail shows one table as the migrations leave it: its columns, the
+ * tables it references, and the migration that declared each relation. The shape is
+ * derived from DDL, so every line resolves to a file a reader can open (AC18).
+ */
+export function renderTableDetail(
+  container: HTMLElement,
+  state: State,
+  name: string,
+  onSelect?: (key: string) => void,
+): void {
+  const table = (state.schema?.tables ?? []).find((t) => t.name === name);
+  clear(container);
+  container.scrollTop = 0;
+  if (!table) {
+    container.append(el("p", { class: "empty", text: "That table is no longer in the data model." }));
+    return;
+  }
+
+  container.append(el("h2", { text: table.name }));
+  container.append(
+    el("p", { class: "muted", text: `declared by ${table.migration}` }),
+  );
+  if (table.unknown) {
+    container.append(el("p", { class: "cycle", text: `Not fully modelled · ${table.unknown}` }));
+  }
+
+  const columns = el("ul", { class: "files" });
+  for (const column of table.columns) {
+    columns.append(
+      el("li", {}, [
+        el("div", { class: "file-path", text: `${column.name}${column.key ? "  (key)" : ""}` }),
+        el("div", { class: "muted", text: column.type }),
+      ]),
+    );
+  }
+  container.append(el("h3", { text: "Columns" }), columns);
+
+  container.append(el("h3", { text: "References" }));
+  if (table.references.length === 0) {
+    container.append(el("p", { class: "empty", text: "No foreign key leaves this table." }));
+  } else {
+    const refs = el("ul", { class: "files" });
+    for (const ref of table.references) {
+      const target = ref.to.split(".")[0];
+      const open = el("button", { class: "outline-file", text: `${ref.from} → ${ref.to}` });
+      open.type = "button";
+      if (onSelect) open.addEventListener("click", () => onSelect(tableKey(target)));
+      else open.disabled = true;
+      refs.append(
+        el("li", {}, [
+          open,
+          el("div", { class: "muted", text: `${ref.constraint ? ref.constraint + " · " : ""}${ref.migration}` }),
+        ]),
+      );
+    }
+    container.append(refs);
+  }
+}
+
 /**
  * renderFileDetail lists one file's symbols with their lines, and the imports that
  * point at it and away from it, so a node in the diagram resolves to source.

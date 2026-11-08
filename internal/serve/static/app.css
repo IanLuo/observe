@@ -365,3 +365,12 @@ footer {
 }
 .outline .cycle-entry { font-size: 11px; }
 .outline .hotspots .outline-file { font-size: 11px; }
+
+/* The data model is a list, not a verdict: a table with an unmodelled statement
+   says so in its second line. */
+.outline.tables .outline-file {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}

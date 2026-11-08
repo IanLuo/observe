@@ -3,7 +3,7 @@
 
 import { Envelope, State } from "./types";
 import { dirOf, renderMap } from "./map";
-import { renderFileDetail, renderMapBar, renderModuleDetail, renderProject } from "./project";
+import { renderFileDetail, renderMapBar, renderModuleDetail, renderProject, renderTableDetail } from "./project";
 import { renderNav } from "./nav";
 import { installResize } from "./resize";
 import {
@@ -112,6 +112,7 @@ function render(): void {
   });
   if (view.selected?.startsWith("s:")) renderFileDetail(nodes.detail, state, view.selected.slice(2), view.showDiff);
   else if (view.selected?.startsWith("m:")) renderModuleDetail(nodes.detail, state, view.selected.slice(2));
+  else if (view.selected?.startsWith("t:")) renderTableDetail(nodes.detail, state, view.selected.slice(2), handlers.onSelect);
   else renderDetail(nodes.detail, state, view.selected, view.showDiff);
   renderConflicts(nodes.conflicts, state);
   renderFooter(nodes.footer, state);
@@ -159,6 +160,7 @@ function selectionExists(state: State, key: string): boolean {
     return (state.structure?.modules ?? []).some((module) => (module.files ?? []).includes(value));
   }
   if (key.startsWith("f:")) return (state.diff.files ?? []).some((file) => file.path === value);
+  if (key.startsWith("t:")) return (state.schema?.tables ?? []).some((table) => table.name === value);
   if (key.startsWith("a:")) {
     return (state.goals ?? []).some((goal) =>
       (goal.checks ?? []).some((check) => (check.evidence ?? []).some((ref) => dirOf(ref.path) === value)),

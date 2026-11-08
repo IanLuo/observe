@@ -5,7 +5,7 @@
 // picture on the right, so the two panels never show the same thing twice.
 
 import { badge, checkStyle, clear, el } from "./dom";
-import { fileKey, moduleKey } from "./project";
+import { fileKey, moduleKey, tableKey } from "./project";
 import { State } from "./types";
 
 export interface NavOptions {
@@ -169,6 +169,34 @@ export function renderNav(root: HTMLElement, state: State, opts: NavOptions): vo
       }
       root.append(list);
     }
+  }
+
+  // The data model is a second construction: tables the migrations declare, not
+  // modules the code declares (AC18).
+  const tables = state.schema?.tables ?? [];
+  if (tables.length > 0) {
+    root.append(
+      el("div", { class: "section-head" }, [
+        el("h2", { text: "Data model" }),
+        el("span", { class: "meta", text: `${tables.length} table${tables.length === 1 ? "" : "s"}` }),
+      ]),
+    );
+    const list = el("ul", { class: "outline tables" });
+    for (const table of tables) {
+      const item = el("li", {});
+      const cols = `${table.columns.length} ${table.columns.length === 1 ? "col" : "cols"}`;
+      const refs = `${table.references.length} ${table.references.length === 1 ? "ref" : "refs"}`;
+      const entry = el("button", {
+        class: "outline-file" + (opts.selected === tableKey(table.name) ? " on" : ""),
+        title: `${table.name} · ${table.migration}`,
+        text: `${table.name} · ${cols} · ${refs}${table.unknown ? " · not fully modelled" : ""}`,
+      });
+      entry.type = "button";
+      entry.addEventListener("click", () => opts.onSelect(tableKey(table.name)));
+      item.append(entry);
+      list.append(item);
+    }
+    root.append(list);
   }
 
   // Changed source files are already in the outline above, marked as changed.
