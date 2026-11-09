@@ -378,6 +378,10 @@ func Render(x int, s string) int {
 			t.Errorf("hotspot detail does not show %q: %q", want, first(detail, 400))
 		}
 	}
+	// The panel says what the number is for, so a reader does not sum it.
+	if !strings.Contains(detail, "where to look first") || !strings.Contains(detail, "do not add up") {
+		t.Errorf("hotspot detail does not say what the score is for: %q", first(detail, 400))
+	}
 	// The parts are the constructs, with their counts.
 	if !strings.Contains(detail, "if") || !strings.Contains(detail, "&&") {
 		t.Errorf("hotspot detail does not name the constructs: %q", first(detail, 400))

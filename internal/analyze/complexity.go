@@ -97,6 +97,11 @@ var decisionLabels = map[string]string{
 // its own syntax, not in the functions it declares. The same code always yields the
 // same number, so a reader can re-derive it (AC17).
 //
+// The number ranks functions against each other; it is not a total. Every function
+// starts at one, so splitting a function adds a path and never removes one. Summing
+// the numbers across a file or a project double-counts that base and says nothing a
+// reader can act on. Compare functions, not sums.
+//
 // A declaration that is not a function scores zero rather than being counted as
 // trivially simple: a class is not one path through the code.
 func complexityOf(lang string, n *ts.Node, src []byte) (int, []DecisionCount) {

@@ -520,6 +520,12 @@ export function renderHotspotDetail(
       text: `Complexity ${spot.complexity} = 1 path + ${branches} branches · ${spot.churn} commits touched this file`,
     }),
   );
+  container.append(
+    el("p", {
+      class: "muted",
+      text: "This ranks where to look first. It is not a score for the file, and the numbers do not add up across functions.",
+    }),
+  );
 
   if (parts.length === 0) {
     container.append(el("p", { class: "empty", text: "No branch was counted for this declaration." }));
