@@ -26,7 +26,7 @@
   repo-does-not-serve: module internal/repo not-imports internal/serve
   repo-does-not-parse: module internal/repo not-imports internal/analyze
   ```
-- **`internal/analyze` → `internal/model`:** deterministic parsing and candidate links; consumes in-memory inputs and emits evidence/provenance. Does not read files, access SQLite, or serve HTTP.
+- **`internal/analyze` → `internal/model`:** deterministic parsing, request-flow resolution from literal route registrations through factory and composition-root bindings to literal SQL (TypeScript only, same language set), and candidate links; consumes in-memory inputs and emits evidence/provenance. Does not read files, access SQLite, or serve HTTP.
   ```check
   analyze-does-not-serve: module internal/analyze not-imports internal/serve
   analyze-does-not-store: module internal/analyze not-imports internal/store
