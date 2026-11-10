@@ -1,4 +1,4 @@
-<!-- specs:locked:36ad836 2026-11-08 type=architecture -->
+<!-- specs:locked:bac0d57 2026-11-10 type=architecture -->
 
 ## Link contract
 - **upstream** (this doc relies on): .agents/specs/observe-progress-view.md, .agents/specs/system-design.md
