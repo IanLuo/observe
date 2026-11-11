@@ -44,7 +44,7 @@
             # proxyVendor keeps each module whole: `go mod vendor` drops the
             # tree-sitter C sources and headers that cgo needs.
             proxyVendor = true;
-            vendorHash = "sha256-0oc+ZBVlVUGNMB+Paei41Y+6La1+kfhYHlPSIbKZJe8=";
+            vendorHash = "sha256-5QqjkPB7+CxB1MBuGipipMKOa8LIdtbeQBETFPSpl5U=";
             subPackages = [ "cmd/observe" ];
             # The tests build fixture repositories, so they need git.
             nativeBuildInputs = [ pkgs.git ];
