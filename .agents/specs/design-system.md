@@ -51,6 +51,12 @@
 - **No-spec state:** browsing remains available; goal alignment displays unavailable. Never derive approved goals from README or prompt.
 - **Conflict state:** prompt/spec or locked-spec conflicts appear as unresolved warning; neither side silently wins.
 - **Failure states:** stale, parser-unsupported, storage-unsaved, link-unresolved, and refresh-failed remain distinct and actionable.
+- **Architecture section:** import cycles and hotspots as outline entries, with their counts in the section head; no cycle states that plainly rather than showing an empty list. Selecting a hotspot opens a panel with both factors and what made the declaration complex, and says the ranking compares declarations rather than totalling a file. The section is outline-only: architecture has no map of its own.
+- **Data model section:** every declared table with its column and reference counts; a table a later statement changed in a way this reader does not model is marked, and the statement is named in its detail. A table reached by a route but declared by no migration is shown from the flow side, never invented here.
+- **Flows section:** routes split into `Reaches a table` and `Stops before a table`, each route labelled with the step that stopped it. A stopped route keeps its place in the outline; stopping is a shown fact, not a hidden one.
+- **Data map (ER):** tables as boxes with foreign keys as edges, laid out by reference depth so a table sits below those it references; a reference cycle settles at depth zero instead of looping. A reference to a table no migration declares draws no edge and claims no table. Selecting a table opens its detail with the migration that declared it, and the migration behind each reference.
+- **Flow map:** routes in one column, the tables they reach in the other, with an edge only where the reader followed the whole chain. A route with no edge is counted below the map and remains in the outline, so a gap is visible rather than absent. Edge and box selection stay in step with the outline.
+- **Map view switch:** `Project`, `Goals`, `Data`, `Flows`; the chosen view is marked, and switching never changes a verdict or a freshness label.
 
 ## Interaction rules
 - **Overview → drill-in:** click goal/module to select; map remains visible and preserves context. Detail opens in a right-side panel with breadcrumb and return-to-overview path.
