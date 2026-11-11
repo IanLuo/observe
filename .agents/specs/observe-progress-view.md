@@ -28,6 +28,7 @@
   - Static analysis only; a relationship no check establishes stays unknown.
   - Live refresh of the open view: after file changes, the affected relationships and diff highlights are brought up to date when a refresh is asked for — the Refresh action, or the page regaining attention. Continuous background watching is desirable but optional in V1.
   - Locked Markdown specs are authoritative goal baselines. Other docs and manually provided task prompts are supporting context only.
+  - A section whose title states it is not a requirement contributes no goals: `Out of scope`, `Not in scope`, `Non-goals`, `Background`, `Glossary`, `Rationale`, and the specs skill's context sections (problem framing, measures, assumptions, verification plan, open questions, link contract). Titles are matched by their words, not one document's exact wording, so numbered or reworded headings count. A title the reader does not recognise contributes goals rather than hiding them: a missed exclusion is visible on the goal, a wrong one would hide a goal silently.
   - Manual optional task-prompt input; it does not override or replace a locked spec.
   - A replaceable local current-state cache outside the repository. No historical snapshots.
   - Read-only operation.
