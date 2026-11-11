@@ -44,6 +44,8 @@ function stopLabel(stop?: string): string {
       return "store is not one class";
     case "store-method":
       return "class has no such method";
+    case "unbound-dependency":
+      return "injected use case";
     case "no-table":
       return "SQL names no table";
     default:

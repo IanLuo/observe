@@ -426,3 +426,43 @@ createServer({ offers: new PostgresOfferStore(pool) });
 		t.Errorf("a resolved flow has stop %q", flow.Stop)
 	}
 }
+
+// A handler that calls a dependency the server receives is not a handler that
+// calls nothing. The two stops must be told apart: the reason names the step that
+// stopped the flow, and "no store call" for a route that does call a use case is a
+// wrong reason. AC19 requires the step, not a convenient label.
+func TestFlowNamesTheDependencyItCannotBind(t *testing.T) {
+	dependencyFixture := func(handlerBody string) []File {
+		return []File{
+			{Path: "apps/api/src/index.ts", Body: []byte(`import { createServer } from './server.js';
+
+createServer({ offers, notifications: createNotificationUseCases({ store: new PostgresSettingsStore(pool) }) });
+`)},
+			{Path: "apps/api/src/server.ts", Body: []byte(`export function createServer({ offers, notifications }) {
+  app.put('/v1/notifications', async (request, reply) => {
+` + handlerBody + `
+  });
+}
+`)},
+		}
+	}
+
+	t.Run("calls an injected use case", func(t *testing.T) {
+		flow := findFlow(t, RequestFlows(dependencyFixture(`    return notifications.set(request.body);`)), "PUT", "/v1/notifications")
+		if flow.Stop != StopUnboundDependency {
+			t.Errorf("stop = %q, want %q (%s)", flow.Stop, StopUnboundDependency, flow.Unknown)
+		}
+		if !strings.Contains(flow.Unknown, "notifications.set") {
+			t.Errorf("the reason does not name the call: %q", flow.Unknown)
+		}
+	})
+
+	// The handler's own request and reply are not dependencies the server receives,
+	// so a handler that only answers still reports that it calls no store.
+	t.Run("only answers", func(t *testing.T) {
+		flow := findFlow(t, RequestFlows(dependencyFixture(`    return reply.header('x', 'y').send({ ok: true });`)), "PUT", "/v1/notifications")
+		if flow.Stop != StopNoStoreCall {
+			t.Errorf("stop = %q, want %q (%s)", flow.Stop, StopNoStoreCall, flow.Unknown)
+		}
+	})
+}

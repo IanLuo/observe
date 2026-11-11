@@ -194,15 +194,44 @@ func RequestFlows(files []File) []Flow {
 // Stop codes name where a flow stopped. They are vocabulary, not prose: the reader
 // groups and colours flows by them, and the sentence in Unknown says the detail.
 const (
-	StopFactoryUnknown  = "factory-unknown"  // the factory is not declared here
-	StopFactoryMethod   = "factory-method"   // the factory publishes no such method
-	StopFactoryIndirect = "factory-indirect" // the factory re-binds its argument
-	StopFactoryArgument = "factory-argument" // the argument does not resolve to a class
-	StopStoreClass      = "store-class"      // the receiver is not one class
-	StopStoreMethod     = "store-method"     // the class has no such method
-	StopNoStoreCall     = "no-store-call"    // the handler calls no store or use case
-	StopNoTable         = "no-table"         // the method names no table in literal SQL
+	StopFactoryUnknown    = "factory-unknown"    // the factory is not declared here
+	StopFactoryMethod     = "factory-method"     // the factory publishes no such method
+	StopFactoryIndirect   = "factory-indirect"   // the factory re-binds its argument
+	StopFactoryArgument   = "factory-argument"   // the argument does not resolve to a class
+	StopStoreClass        = "store-class"        // the receiver is not one class
+	StopStoreMethod       = "store-method"       // the class has no such method
+	StopNoStoreCall       = "no-store-call"      // the handler reaches no data of its own
+	StopUnboundDependency = "unbound-dependency" // the handler calls a dependency the server receives
+	StopNoTable           = "no-table"           // the method names no table in literal SQL
 )
+
+// unboundDependency finds a call on a receiver the registering function receives as
+// a parameter: a use case or a store the composition root supplies. The handler's own
+// request and reply are not parameters of that function, so a route that only answers
+// still reports that it reaches no data.
+func unboundDependency(f *fileFacts, route routeSite) (callSite, bool) {
+	for _, c := range route.calls {
+		if f.receives(route.scope, c.receiver) {
+			return c, true
+		}
+	}
+	return callSite{}, false
+}
+
+// receives reports whether name is a parameter of scope, by key or by position.
+func (f *fileFacts) receives(scope, name string) bool {
+	for _, local := range f.params[scope] {
+		if local == name {
+			return true
+		}
+	}
+	for _, local := range f.order[scope] {
+		if local != "" && local == name {
+			return true
+		}
+	}
+	return false
+}
 
 // resolveFlow follows one route through the bindings, appending a hop per step.
 func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, factories map[string]*factoryDef, classes map[string]*classDef) Flow {
@@ -268,6 +297,15 @@ func resolveFlow(f *fileFacts, route routeSite, facts map[string]*fileFacts, fac
 			break
 		}
 		if storeCall == nil {
+			// A call on a dependency the server receives is not a call on nothing: the
+			// handler reached a use case, and this reader does not bind it. Saying "no
+			// store call" there would name the wrong step (AC19).
+			if dep, ok := unboundDependency(f, route); ok {
+				flow.Stop = StopUnboundDependency
+				flow.Unknown = "the handler calls " + dep.receiver + "." + dep.method +
+					", a dependency this server receives; the reader does not bind it to a class"
+				return flow
+			}
 			flow.Stop = StopNoStoreCall
 			flow.Unknown = "no call in this handler reaches a factory-built use case or a store class"
 			return flow
