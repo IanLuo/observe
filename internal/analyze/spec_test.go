@@ -193,3 +193,36 @@ func TestHeadingChainKeepsSectionNumbers(t *testing.T) {
 		t.Errorf("heading chain = %v", got)
 	}
 }
+
+// A section whose title says it is not a requirement must not yield goals. The
+// context list used to hold only the six titles this project's own spec happens to
+// use, so any repository that writes "Out of scope" or "Non-goals" had its
+// exclusions shown as things the project must do.
+func TestSectionsThatSayTheyAreNotRequirementsYieldNoGoals(t *testing.T) {
+	for _, title := range []string{
+		"Out of scope",
+		"7 · Out of scope",
+		"Non-goals",
+		"Not in scope",
+		"Background",
+		"Glossary",
+		"Rationale",
+	} {
+		t.Run(title, func(t *testing.T) {
+			body := []byte(strings.Join([]string{
+				"# Spec",
+				"",
+				"## " + title,
+				"- buyer accounts on the platform are not built.",
+				"",
+				"## 4 · Acceptance criteria",
+				"- a paid order yields one entitlement.",
+			}, "\n") + "\n")
+
+			goals := Requirements("spec.md", body)
+			if len(goals) != 1 || goals[0].Label != "a paid order yields one entitlement." {
+				t.Fatalf("goals = %+v, want only the acceptance criterion", goals)
+			}
+		})
+	}
+}

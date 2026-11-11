@@ -68,13 +68,13 @@ func Baseline(docs []Doc) model.SpecBaseline {
 }
 
 // contextOnly names the sections whose bullets are context rather than goals:
-// problem framing, measures, assumptions, process, and open questions. The specs
-// skill fixes this document shape, so the names are stable across projects.
+// problem framing, measures, assumptions, process, and open questions. These are
+// the specs skill's own section names, matched exactly.
 //
-// Every other section contributes goals — including headings this set does not
-// name. Excluding by name rather than including by name means a project whose
-// spec uses different headings still yields requirements, instead of reporting a
-// usable baseline with no goals in it.
+// Every other section contributes goals — including headings neither list names.
+// Excluding by name rather than including by name means a project whose spec uses
+// different headings still yields requirements, instead of reporting a usable
+// baseline with no goals in it.
 var contextOnly = map[string]bool{
 	"Problem & who breaks":       true,
 	"KPIs & failure signal":      true,
@@ -82,6 +82,36 @@ var contextOnly = map[string]bool{
 	"Verification plan":          true,
 	"Open questions":             true,
 	"Link contract":              true,
+}
+
+// contextPhrases mark a section whose title says it does not state requirements,
+// for documents that word the same sections differently from the specs skill:
+// "7 · Out of scope", "Non-goals", "Background", "Glossary", "Rationale".
+//
+// The list stays deliberately narrow. A title it does not match costs a goal the
+// reader can see; a title it wrongly matches hides one silently, which is the worse
+// error for a baseline that claims to be complete.
+var contextPhrases = []string{
+	"out of scope",
+	"not in scope",
+	"non-goal",
+	"background",
+	"glossary",
+	"rationale",
+}
+
+// isContextSection reports whether a section title marks its bullets as context.
+func isContextSection(key string) bool {
+	if contextOnly[key] {
+		return true
+	}
+	lower := strings.ToLower(key)
+	for _, phrase := range contextPhrases {
+		if strings.Contains(lower, phrase) {
+			return true
+		}
+	}
+	return false
 }
 
 // leadIn matches the bold phrase that opens many bullets, as in
@@ -321,7 +351,7 @@ func isTopLevelItem(line string) bool {
 // prose into goals.
 func inContextOnly(stack []section) bool {
 	for _, s := range stack {
-		if contextOnly[s.key] {
+		if isContextSection(s.key) {
 			return true
 		}
 	}
