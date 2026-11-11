@@ -63,4 +63,4 @@ web/ (TypeScript + SVG) ── built static assets embedded by internal/serve
 | Product requirements, goals, acceptance and NFRs | `.agents/specs/observe-progress-view.md` |
 | Components, data contract, interfaces, failure policy, scale | `.agents/specs/system-design.md` |
 | Load-bearing decisions, layer ownership, repo tree | `.agents/specs/architecture.md` |
-| UI direction and tokens | `.agents/specs/design-system.md` (locked at `862d5b7`) |
+| UI direction and tokens | `.agents/specs/design-system.md` (locked at `997f99f`) |

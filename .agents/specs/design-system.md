@@ -1,4 +1,4 @@
-<!-- design:locked:862d5b7 2026-10-31 -->
+<!-- design:locked:997f99f 2026-11-11 -->
 
 # Design system — Observe
 
