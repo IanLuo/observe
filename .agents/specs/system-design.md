@@ -45,6 +45,7 @@
 - **Evidence store cache read/write failure:** continue browsing and any unaffected live analysis where possible; mark results unsaved/stale. Never write a fallback inside the repository.
 - **Current cache corrupt:** discard the disposable cache, report the issue, recompute from source/specs, and preserve the repository unchanged. No history records exist to delete.
 - **Broken source/evidence link:** show the unresolved reference and unknown state; do not silently retarget to a nearby symbol or line.
+- **Request flow stopped at an unbound dependency:** a handler that calls a use case or store the composition root supplies, through a binding this reader does not follow, stops with that reason and shows no table. Binding injected use cases is a new rule rather than a fix, so the route stays unknown until that rule is decided; the stop names the call, so a reader can see what was not followed.
 - **Unknown dependency impact:** immediately mark current analysis stale; run full reconciliation. If reconciliation fails, retain prior results as stale and offer retry/manual refresh.
 - **Presenter failure:** analysis data remains local and unchanged; on reload, validate the cache fingerprint and restore only if current, otherwise discard and recompute.
 - **Availability policy:** fail open for source browsing and unaffected analysis; fail closed for claims about affected goals. Keep stale data visible but label it; never label it current/verified until supported.
