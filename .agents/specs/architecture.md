@@ -72,7 +72,3 @@
 - `.agents/specs/system-design.md` — locked components, data, interfaces, failure, and scale.
 - `docs/adr/` — N/A: directory does not exist; create only when a decision requires a separate record.
 - `CONVENTIONS.md` — N/A: not present; cross-cutting rules are in this architecture doc until a demonstrated need justifies a separate conventions file.
-
-## Link contract
-- **upstream:** `.agents/specs/observe-progress-view.md`, `.agents/specs/system-design.md`.
-- **referrers:** `.agents/specs/design-system.md`, `AGENTS.md`.
