@@ -102,6 +102,7 @@ button:disabled { opacity: 0.55; cursor: default; }
 .st-unknown, .st-unavailable { color: var(--slate); border-color: var(--slate); border-style: dotted; }
 .st-stale { color: var(--stale); border-color: var(--stale); }
 .st-verified { color: var(--verified); border-color: var(--verified); }
+.st-unmeasured { color: var(--slate); border-color: var(--slate); }
 
 /* ---------- layout ---------- */
 

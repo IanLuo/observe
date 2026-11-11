@@ -94,6 +94,7 @@ func TestBrowserDrillsFromGoalToSource(t *testing.T) {
 	visit(ctx, t, url)
 
 	// The goal view, then the first goal in it.
+	waitFor(ctx, t, `Array.from(document.querySelectorAll("button.mode")).some(b => b.textContent.trim() === "Goals")`)
 	click(ctx, t, `Array.from(document.querySelectorAll("button.mode")).find(b => b.textContent.trim() === "Goals").click()`)
 	waitFor(ctx, t, `document.querySelectorAll("g.node-goal").length > 0`)
 
@@ -243,6 +244,7 @@ func TestBrowserDrawsTheDataModelFromMigrations(t *testing.T) {
 	ctx := browser(t)
 	visit(ctx, t, url)
 
+	waitFor(ctx, t, `Array.from(document.querySelectorAll("button.mode")).some(b => b.textContent.trim() === "Data")`)
 	click(ctx, t, `Array.from(document.querySelectorAll("button.mode")).find(b => b.textContent.trim() === "Data").click()`)
 	waitFor(ctx, t, `document.querySelectorAll("g.er-table").length === 2`)
 
@@ -295,6 +297,7 @@ func TestBrowserDrawsTheFlowMap(t *testing.T) {
 		}
 	}
 
+	waitFor(ctx, t, `Array.from(document.querySelectorAll("button.mode")).some(b => b.textContent.trim() === "Flows")`)
 	click(ctx, t, `Array.from(document.querySelectorAll("button.mode")).find(b => b.textContent.trim() === "Flows").click()`)
 	waitFor(ctx, t, `document.querySelectorAll("g.flow-node.route").length === 1`)
 	waitFor(ctx, t, `document.querySelectorAll("g.flow-node.table").length === 1`)
@@ -449,5 +452,76 @@ func TestBrowserShowsTheArchitectureSection(t *testing.T) {
 	plain := text(ctx, t, `document.querySelector("#nav").textContent`)
 	if !strings.Contains(plain, "No import cycles") {
 		t.Errorf("a project without a cycle does not say so: %q", first(plain, 300))
+	}
+}
+
+// AC1: a goal shows its checks with a verdict, or an explicit "no check defined"
+// state. A8 keeps the verdict unknown, so the distinction is presentation: a goal
+// nothing measures must not read the same as a goal whose evidence is missing.
+func TestBrowserSaysWhenNothingMeasuresAGoal(t *testing.T) {
+	dir := fixtureRepo(t, map[string]string{
+		".agents/specs/spec.md": `<!-- specs:locked:abc1234 2026-01-01 type=spec -->
+
+# Spec
+## Scope
+- The reader exposes ` + "`Open`" + ` for a repository.
+
+  ` + "```check" + `
+  open-exists: symbol Open exists
+  ` + "```" + `
+- The cache never writes inside the repository.
+`,
+		"internal/app/open.go": "package app\n\nfunc Open() {}\n",
+	})
+	s := newServer(t, dir, "")
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	url, err := s.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+
+	ctx := browser(t)
+	visit(ctx, t, url)
+
+	waitFor(ctx, t, `Array.from(document.querySelectorAll("button.mode")).some(b => b.textContent.trim() === "Goals")`)
+	click(ctx, t, `Array.from(document.querySelectorAll("button.mode")).find(b => b.textContent.trim() === "Goals").click()`)
+	waitFor(ctx, t, `document.querySelectorAll("g.node-goal").length > 1`)
+
+	// Open the goal the spec gives no check.
+	click(ctx, t, `(() => {
+		const nodes = [...document.querySelectorAll("g.node-goal")];
+		const unmeasured = nodes.find((n) => (n.textContent || "").includes("No check defined"));
+		if (!unmeasured) throw new Error("no goal node reports no check defined");
+		unmeasured.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		return true;
+	})()`)
+	waitFor(ctx, t, `(document.querySelector("#detail .badges") || {}).textContent`)
+
+	badges := text(ctx, t, `document.querySelector("#detail .badges").textContent`)
+	detail := text(ctx, t, `document.querySelector("#detail").textContent`)
+	if !strings.Contains(badges, "No check") {
+		t.Errorf("an unmeasured goal shows a plain verdict: badges=%q", badges)
+	}
+	if strings.Contains(badges, "Unknown") {
+		t.Errorf("an unmeasured goal still reads as unknown: %q", badges)
+	}
+	if !strings.Contains(detail, "nothing measures it") {
+		t.Errorf("the panel does not say why: %q", first(detail, 300))
+	}
+
+	// A goal that does declare a check keeps its verdict, so the states stay distinct.
+	click(ctx, t, `(() => {
+		const nodes = [...document.querySelectorAll("g.node-goal")];
+		const measured = nodes.find((n) => (n.textContent || "").includes("Pass") || (n.textContent || "").includes("Violated") || (n.textContent || "").includes("Unknown"));
+		measured.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+		return true;
+	})()`)
+	waitFor(ctx, t, `(document.querySelector("#detail").textContent || "").includes("open-exists")`)
+	measured := text(ctx, t, `document.querySelector("#detail .badges").textContent`)
+	if strings.Contains(measured, "No check") {
+		t.Errorf("a measured goal is labelled as unmeasured: %q", measured)
 	}
 }

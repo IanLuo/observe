@@ -63,6 +63,13 @@ export function checkStyle(status: string): StatusStyle {
   }
 }
 
+/**
+ * noCheckStyle labels a goal the document gives no check. The verdict stays unknown,
+ * because nothing measured it, but "unknown" alone reads as evidence that is missing,
+ * which is a different fact: the spec states a claim and nothing measures it (AC1, A8).
+ */
+export const noCheckStyle: StatusStyle = { icon: "–", word: "No check", cls: "st-unmeasured" };
+
 export function verificationStyle(verification: string): StatusStyle {
   switch (verification) {
     case "verified":

@@ -8,6 +8,7 @@ import {
   clear,
   el,
   locationText,
+  noCheckStyle,
   verificationStyle,
   type StatusStyle,
 } from "./dom";
@@ -171,7 +172,10 @@ export function renderDetail(
 
   root.append(el("div", { class: "crumbs", text: [goal.invariant ? "Invariant" : goal.spec_path, ...goal.heading].join(" › ") }));
   root.append(el("h2", { text: goal.label }));
-  root.append(el("div", { class: "badges" }, [badge(checkStyle(goalStatus(goal)))]));
+  const checks = checksOf(goal);
+  root.append(
+    el("div", { class: "badges" }, [badge(checks.length === 0 ? noCheckStyle : checkStyle(goalStatus(goal)))]),
+  );
 
   root.append(
     el("p", {
@@ -184,7 +188,6 @@ export function renderDetail(
 
   if (goal.reading) root.append(el("p", { class: "reading", text: goal.reading }));
 
-  const checks = checksOf(goal);
   root.append(el("h2", { class: "sub", text: "Checks" }));
   if (checks.length === 0) {
     root.append(el("p", { class: "empty", text: "No check defined for this goal. The spec states a claim; nothing measures it." }));
