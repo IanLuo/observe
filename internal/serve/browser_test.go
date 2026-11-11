@@ -387,3 +387,67 @@ func Render(x int, s string) int {
 		t.Errorf("hotspot detail does not name the constructs: %q", first(detail, 400))
 	}
 }
+
+// AC16 shown, not just computed: the outline carries the cycle, opening it lands on
+// a module in that cycle, and a project without a cycle says so instead of drawing
+// an empty section.
+func TestBrowserShowsTheArchitectureSection(t *testing.T) {
+	cyclic := fixtureRepo(t, map[string]string{
+		".agents/specs/spec.md": specDoc,
+		"internal/a/a.go":       "package a\n\nimport _ \"x/internal/b\"\n",
+		"internal/b/b.go":       "package b\n\nimport _ \"x/internal/c\"\n",
+		"internal/c/c.go":       "package c\n\nimport _ \"x/internal/a\"\n",
+	})
+	s := newServer(t, cyclic, "")
+	if err := s.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	url, err := s.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close(context.Background()) })
+
+	ctx := browser(t)
+	visit(ctx, t, url)
+
+	waitFor(ctx, t, `document.querySelectorAll("#nav .outline.cycles button").length > 0`)
+	label := text(ctx, t, `document.querySelector("#nav .outline.cycles button").textContent`)
+	for _, want := range []string{"internal/a", "internal/b", "internal/c"} {
+		if !strings.Contains(label, want) {
+			t.Errorf("cycle entry does not name %q: %q", want, label)
+		}
+	}
+
+	// The section head counts what it holds, so the count and the list agree.
+	head := text(ctx, t, `document.querySelector("#nav").textContent`)
+	if !strings.Contains(head, "Architecture") || !strings.Contains(head, "1 cycle") {
+		t.Errorf("architecture head does not count the cycle: %q", first(head, 300))
+	}
+
+	click(ctx, t, `document.querySelector("#nav .outline.cycles button").click()`)
+	waitFor(ctx, t, `(document.querySelector("#detail").textContent || "").includes("internal/a")`)
+
+	// A project with no cycle says so plainly rather than showing nothing.
+	acyclic := fixtureRepo(t, map[string]string{
+		".agents/specs/spec.md": specDoc,
+		"internal/a/a.go":       "package a\n\nfunc A() {}\n",
+		"internal/b/b.go":       "package b\n\nfunc B() {}\n",
+	})
+	s2 := newServer(t, acyclic, "")
+	if err := s2.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	url2, err := s2.Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = s2.Close(context.Background()) })
+
+	visit(ctx, t, url2)
+	waitFor(ctx, t, `(document.querySelector("#nav").textContent || "").includes("Architecture")`)
+	plain := text(ctx, t, `document.querySelector("#nav").textContent`)
+	if !strings.Contains(plain, "No import cycles") {
+		t.Errorf("a project without a cycle does not say so: %q", first(plain, 300))
+	}
+}
